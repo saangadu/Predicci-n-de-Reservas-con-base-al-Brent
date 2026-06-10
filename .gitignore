@@ -1,0 +1,13 @@
+# Datos corporativos Ecopetrol (no subir a GitHub)
+datos/
+resultados/
+docs/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# IDE / herramientas locales
+.cursor/
+.claude/
