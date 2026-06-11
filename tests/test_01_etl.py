@@ -153,6 +153,18 @@ def test_target_nulo_flaggeado(tablon):
         assert flaggeados, "Filas CONSOLIDADO sin SENSIBILIDAD no tienen ALERTA=TARGET_NULO"
 
 
+def test_dif_neto_salto_flaggeado(tablon):
+    """Alerta calidad de datos (2026-06-11): salto > 5 USD en el diferencial
+    neto−brent entre quarters consecutivos → ALERTA=DIF_NETO_SALTO.
+    Caso conocido: RUBIALES 2025_Q4 (dif pasa de −8 a +0.03)."""
+    rub = tablon[(tablon["CAMPO"] == "RUBIALES") &
+                 (tablon["ESCENARIO"] == "CONSOLIDADO_2025_Q4")]
+    if rub.empty:
+        pytest.skip("RUBIALES 2025_Q4 no en tablon")
+    assert rub["ALERTA"].str.contains("DIF_NETO_SALTO", na=False).any(), \
+        "RUBIALES 2025_Q4 sin ALERTA=DIF_NETO_SALTO (salto de diferencial conocido)"
+
+
 def test_no_homologados_son_cero(tablon):
     """No debe haber filas NO_HOMOLOGADO en campos piloto."""
     no_hom = tablon[tablon["ALERTA"].str.contains("NO_HOMOLOGADO", na=False)]

@@ -60,6 +60,16 @@ ALIAS_OVERRIDE = {
     "GUANDO SW":         "GUANDO SOUTH WEST",
     "TOROS":             "LOS TOROS",
     "MANSOYA UNIFICADO": "MANSOYA",              # rollup -> granular (no existe en DIM)
+
+    # ── Renombres historicos del mismo campo (DIM UNIFICADO, directriz 2026-06-11) ──
+    # HIST 1P cambio el nombre del campo entre vigencias: cada variante existe como
+    # fila propia en DIM pero UNIFICADO las consolida. Sin el merge, la serie BASE
+    # queda partida en dos campos y el baseline/delta usan historia truncada.
+    "CA\xd1O SURESTE":     "CA\xd1O SUR ESTE",    # 2017-2023 -> 2024+ (UNIFICADO: CAÑO SUR ESTE)
+    "CARACARA SUR B-C":    "CARACARA SUR B Y C",  # 2017-2023 -> 2024+ (UNIFICADO: CARACARA SUR B y C)
+    "CHICHIMENE K - T":    "CHICHIMENE",          # 2023 (antes del split de CHICHIMENE SW en 2024)
+    "CHICHIMENE-K":        "CHICHIMENE",          # variantes de yacimiento (UNIFICADO: CHICHIMENE)
+    "CHICHIMENE-T":        "CHICHIMENE",
 }
 
 # Sufijos de yacimiento/segmento que cuelgan del nombre de campo y deben removerse

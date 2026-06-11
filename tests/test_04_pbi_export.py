@@ -39,13 +39,21 @@ def test_csv_existe():
 
 def test_columnas_obligatorias(df_export):
     cols = ["CAMPO", "MOTOR", "ESCENARIO_DESCUENTO", "BRENT_USD_BBL",
-            "PRECIO_NETO_EFECTIVO_USD_BBL", "DELTA_PRED_MBPE",
+            "PRECIO_NETO_EFECTIVO_USD_BBL", "DESCUENTO_IMPLICITO_USD_BBL",
+            "DELTA_PRED_MBPE",
             "VOLUMEN_1P_BASELINE_MBPE", "VOLUMEN_1P_PREDICHO_MBPE",
             "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
             "ES_VIABLE", "ES_FULL_RESERVAS", "ES_EXTRAPOLADO",
             "NIVEL_CONFIANZA"]
     for c in cols:
         assert c in df_export.columns, f"Columna {c} faltante en export"
+
+
+def test_descuento_implicito_coherente(df_export):
+    """DESCUENTO_IMPLICITO = Brent - Precio Neto efectivo (Modelo 2 no separa cal/tra)."""
+    esperado = df_export["BRENT_USD_BBL"] - df_export["PRECIO_NETO_EFECTIVO_USD_BBL"]
+    diff = (esperado - df_export["DESCUENTO_IMPLICITO_USD_BBL"]).abs()
+    assert (diff < 0.05).all(), "DESCUENTO_IMPLICITO no coincide con Brent - Neto"
 
 
 def test_sin_columnas_opp1(df_export):
@@ -69,9 +77,11 @@ def test_sin_nan_en_vol_predicho(df_export):
 
 
 def test_motores_presentes(df_export):
+    """Arquitectura 1D: motores Isotonica (primario) y Suave (validacion). XGBoost retirado."""
     motores = set(df_export["MOTOR"].unique())
-    assert "XGBoost" in motores
     assert "Isotonica" in motores
+    assert "Suave" in motores
+    assert "XGBoost" not in motores, "XGBoost fue retirado; no debe aparecer en el export"
 
 
 def test_vol_predicho_no_negativo(df_export):
@@ -204,6 +214,44 @@ def test_nivel_confianza_valido(df_export):
     assert not falsos, f"SOLO_SINTETICO en export pero N_REAL>0 en metricas: {falsos}"
 
 
+def test_gate_skill_en_confianza():
+    """Gate de skill (2026-06-11): ALTA exige SKILL>0 salvo campo plano
+    (MAE_NAIVE < 2 MBPE, donde la media ingenua es imbatible por construccion)."""
+    import importlib
+    mod = importlib.import_module("04_pbi_export")
+    base = dict(n_real=8, mae_rel=0.10, divergencia=0.10, baseline=100.0, mae_abs=10.0)
+    # Sin skill + naive grande → MEDIA (caso AKACIAS)
+    nivel, motivo = mod.clasificar_confianza(**base, skill=-0.01, mae_naive=14.0)
+    assert nivel == "MEDIA" and "sin skill" in motivo
+    # Con skill → ALTA
+    nivel, _ = mod.clasificar_confianza(**base, skill=0.5, mae_naive=14.0)
+    assert nivel == "ALTA"
+    # Sin skill pero campo plano (naive pequeño) → exento, ALTA (caso CAÑO SUR ESTE)
+    nivel, _ = mod.clasificar_confianza(**base, skill=-0.4, mae_naive=1.2)
+    assert nivel == "ALTA"
+    # SKILL NaN no penaliza
+    nivel, _ = mod.clasificar_confianza(**base)
+    assert nivel == "ALTA"
+
+
+def test_cap_outlier_por_materialidad():
+    """Cap de outlier (2026-06-11): OUTLIER_LOO solo degrada si MAE_REL >= 5%.
+    Caso RUBIALES: ratio disparado por un fold en la frontera de vigencias con
+    error relativo 0.9% — inmaterial, no debe bajar de ALTA."""
+    import importlib
+    mod = importlib.import_module("04_pbi_export")
+    base = dict(n_real=8, divergencia=0.10, baseline=323.0, skill=0.8, mae_naive=15.0)
+    # Outlier + error inmaterial (<5%) → ALTA, motivo con OUTLIER_LOO_INMATERIAL
+    nivel, motivo = mod.clasificar_confianza(**base, mae_rel=0.009, mae_abs=2.9,
+                                             outlier_lloo=True)
+    assert nivel == "ALTA" and "OUTLIER_LOO_INMATERIAL" in motivo
+    # Outlier + error material (>=5%) → cap MEDIA (comportamiento original)
+    nivel, motivo = mod.clasificar_confianza(**base, mae_rel=0.15, mae_abs=48.0,
+                                             outlier_lloo=True)
+    assert nivel == "MEDIA" and "OUTLIER_LOO" in motivo \
+        and "INMATERIAL" not in motivo
+
+
 def test_comparacion_vs_anterior_existe():
     """comparacion_vs_anterior.csv debe existir con las columnas de versionamiento (Opp #4)."""
     ruta = RESULTADOS / "comparacion_vs_anterior.csv"
@@ -220,3 +268,32 @@ def test_changelog_predicciones_existe():
     """docs/CHANGELOG_PREDICCIONES.md debe existir tras correr 04_pbi_export.py."""
     ruta = ROOT / "docs" / "CHANGELOG_PREDICCIONES.md"
     assert ruta.exists(), "docs/CHANGELOG_PREDICCIONES.md no existe"
+
+
+def test_escenarios_monotonos_alto_base_bajo(df_export):
+    """
+    Escenarios del Modelo 2: ALTO >= BASE >= BAJO en VOLUMEN para cada CAMPO×MOTOR×Brent.
+    Por construccion neto_ALTO >= neto_BASE >= neto_BAJO y el Modelo 1 es monotono creciente.
+    Corrige la anomalia del diseño 3D (a mayor precio, menor volumen en escenarios ALTOS).
+    """
+    piv = df_export.pivot_table(
+        index=["CAMPO", "MOTOR", "BRENT_USD_BBL"],
+        columns="ESCENARIO_DESCUENTO", values="VOLUMEN_1P_PREDICHO_MBPE")
+    if not {"BAJO", "BASE", "ALTO"}.issubset(piv.columns):
+        pytest.skip("Faltan escenarios en el export")
+    viol = ((piv["ALTO"] < piv["BASE"] - 1e-6) |
+            (piv["BASE"] < piv["BAJO"] - 1e-6)).sum()
+    assert viol == 0, f"{viol} filas con ALTO<BASE o BASE<BAJO (anomalia de escenarios)"
+
+
+def test_neto_desde_brent_ordena_escenarios():
+    """neto_desde_brent: BAJO <= BASE <= ALTO por construccion (bandas centradas en P50)."""
+    import importlib
+    m2 = importlib.import_module("03b_correlacion_brent")
+    coef = {"ALPHA": 5.0, "BETA": 0.85,
+            "RESID_P10": -3.0, "RESID_P50": 1.0, "RESID_P90": 4.0}
+    brent = np.array([60.0, 75.0, 90.0])
+    bajo = m2.neto_desde_brent(coef, brent, "BAJO")
+    base = m2.neto_desde_brent(coef, brent, "BASE")
+    alto = m2.neto_desde_brent(coef, brent, "ALTO")
+    assert np.all(bajo <= base + 1e-9) and np.all(base <= alto + 1e-9)

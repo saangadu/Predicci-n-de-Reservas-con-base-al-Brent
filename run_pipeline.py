@@ -6,8 +6,9 @@ Secuencia:
   Fase 0.5: 05_breakeven.py  → tests/test_05_breakeven.py
   Fase 1:   01_etl.py        → tests/test_01_etl.py
   Fase 2:   02_synthetic.py  → tests/test_02_synthetic.py
-  Fase 3:   03_modelo.py     → tests/test_03_modelo.py
-  Fase 4:   04_pbi_export.py → tests/test_04_pbi_export.py
+  Fase 3:   03_modelo.py     → tests/test_03_modelo.py        (Modelo 1: Neto→Delta)
+  Fase 3b:  03b_correlacion_brent.py → tests/test_03b_correlacion.py (Modelo 2: Brent→Neto)
+  Fase 4:   04_pbi_export.py → tests/test_04_pbi_export.py    (composicion + meshgrid)
 
 Si cualquier gate falla → pipeline aborta con exit code 1.
 100% verde → artefactos validos.
@@ -59,9 +60,14 @@ FASES = [
         "gate":   "tests/test_02_synthetic.py",
     },
     {
-        "nombre": "Fase 3 — Modelo",
+        "nombre": "Fase 3 — Modelo 1 (Neto->Delta)",
         "script": "03_modelo.py",
         "gate":   "tests/test_03_modelo.py",
+    },
+    {
+        "nombre": "Fase 3b — Modelo 2 (Brent->Neto)",
+        "script": "03b_correlacion_brent.py",
+        "gate":   "tests/test_03b_correlacion.py",
     },
     {
         "nombre": "Fase 4 — Export PBI",

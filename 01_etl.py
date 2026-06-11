@@ -122,11 +122,31 @@ def leer_hist1p_reservas() -> pd.DataFrame:
 
     cols = ["CAMPO", "AÑO", "PDP", "PNP", "PND", "1P", "PROD"]
     cols = [c for c in cols if c in df.columns]
-    return df[cols].rename(columns={
+    df = df[cols].rename(columns={
         "PDP": "VOLUMEN_PDP_MBPE", "PNP": "VOLUMEN_PNP_MBPE",
         "PND": "VOLUMEN_PND_MBPE", "1P":  "VOLUMEN_1P_OFICIAL_MBPE",
         "PROD": "PRODUCCION_MBPE",
     })
+
+    # Dedupe CAMPO×AÑO post-homologacion: los renombres historicos (CAÑO SURESTE→
+    # CAÑO SUR ESTE, CHICHIMENE K - T→CHICHIMENE, etc.) pueden dejar dos filas del
+    # mismo año — una con volumen y otra vacia (el año en que la fuente cambio de
+    # nombre) — y HIST trae duplicados exactos (CHICHIMENE 2018). Se prefiere la
+    # fila con 1P informado; duplicados con volumen distinto se reportan.
+    n0 = len(df)
+    conflicto = (df.dropna(subset=["VOLUMEN_1P_OFICIAL_MBPE"])
+                   .groupby(["CAMPO", "AÑO"])["VOLUMEN_1P_OFICIAL_MBPE"]
+                   .nunique() > 1)
+    if conflicto.any():
+        print(f"      [WARN] {int(conflicto.sum())} CAMPO×AÑO con volumenes 1P "
+              f"distintos duplicados — se conserva el mayor: "
+              f"{list(conflicto[conflicto].index[:5])}")
+    df = (df.sort_values("VOLUMEN_1P_OFICIAL_MBPE", ascending=False, na_position="last")
+            .drop_duplicates(subset=["CAMPO", "AÑO"], keep="first"))
+    if n0 - len(df) > 0:
+        print(f"      [INFO] {n0 - len(df)} filas CAMPO×AÑO duplicadas eliminadas "
+              f"(renombres historicos / duplicados de fuente)")
+    return df
 
 
 def leer_hist1p_precio(df_brent_of: pd.DataFrame) -> pd.DataFrame:
@@ -190,9 +210,14 @@ def leer_hist1p_precio(df_brent_of: pd.DataFrame) -> pd.DataFrame:
         print(f"      [INFO] {n_fail} filas con identidad violada -> ALERTA=IDENTIDAD_PRECIO")
     df["ALERTA_PRECIO"] = np.where(ident > TOL_IDENTIDAD, "IDENTIDAD_PRECIO", "")
 
-    return df[["CAMPO", "AÑO", "BRENT_FLAT_USD_BBL",
-               "DESCUENTO_CALIDAD_USD_BBL", "DESCUENTO_TRANSPORTE_USD_BBL",
-               "PRECIO_NETO_USD_BBL", "ALERTA_PRECIO"]].copy()
+    df = df[["CAMPO", "AÑO", "BRENT_FLAT_USD_BBL",
+             "DESCUENTO_CALIDAD_USD_BBL", "DESCUENTO_TRANSPORTE_USD_BBL",
+             "PRECIO_NETO_USD_BBL", "ALERTA_PRECIO"]].copy()
+    # Dedupe CAMPO×AÑO post-homologacion (renombres historicos): preferir fila
+    # con Precio Neto informado.
+    df = (df.sort_values("PRECIO_NETO_USD_BBL", na_position="last")
+            .drop_duplicates(subset=["CAMPO", "AÑO"], keep="first"))
+    return df
 
 
 def leer_consolidado() -> pd.DataFrame:
@@ -293,6 +318,30 @@ def leer_consolidado() -> pd.DataFrame:
               .drop_duplicates(["CAMPO", "ESCENARIO"], keep="first")
               .drop(columns=["_orden"])
               .reset_index(drop=True))
+
+    # Alerta calidad de datos (2026-06-11): el diferencial implicito (neto − brent
+    # del deck) debe ser estable entre quarters consecutivos del mismo campo. Un
+    # salto > TOL_DIF_SALTO marca DIF_NETO_SALTO — caso RUBIALES 2025_Q4: dif pasa
+    # de −8 a +0.03 (neto ≈ brent) mientras sus descuentos dicen −12.8; pendiente
+    # validar el neto con planeacion. Se marca, no se corrige ni descarta.
+    TOL_DIF_SALTO = 5.0
+    out["_dif"] = out["PRECIO_NETO_USD_BBL"] - out["BRENT_FLAT_USD_BBL"]
+    n_saltos = 0
+    for campo, g in out.groupby("CAMPO"):
+        g = g.sort_values("VIGENCIA")
+        salto = g["_dif"].diff().abs() > TOL_DIF_SALTO
+        idx_salto = g.index[salto.fillna(False)]
+        if len(idx_salto) > 0:
+            n_saltos += len(idx_salto)
+            out.loc[idx_salto, "ALERTA"] = out.loc[idx_salto, "ALERTA"].apply(
+                lambda a: "|".join(p for p in [str(a or ""), "DIF_NETO_SALTO"] if p))
+    out.drop(columns=["_dif"], inplace=True)
+    if n_saltos > 0:
+        campos_salto = sorted(out.loc[out["ALERTA"].str.contains("DIF_NETO_SALTO", na=False),
+                                      "CAMPO"].unique())
+        print(f"      [WARN] {n_saltos} quarters con salto de diferencial neto-brent "
+              f"> {TOL_DIF_SALTO} USD (ALERTA=DIF_NETO_SALTO) en {len(campos_salto)} campos")
+        print(f"             {campos_salto[:10]}")
     return out
 
 
@@ -431,6 +480,11 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
         sum_v_pnd = sum_fin_pnd = 0.0
         # PDP operacional para BK_ANCLA_PDP
         bk_ancla_pdp = np.nan
+        # Salidas POR CLASE para la escalera multi-clase (Path D, 2026-06-11):
+        # limite economico propio de PNP/PND — debajo, la clase deja de ser
+        # bookeable. Si el solver no lo separa, la clase degrada a BK_ANCLA_FIN
+        # (ponderado) en 02_synthetic.
+        salidas_clase = {"D-PNP": np.nan, "D-PND": np.nan}
         # Conteo de insensibles para flag de campo
         n_clases = n_insensibles = 0
 
@@ -473,6 +527,10 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
                 sum_v_pnd   += v
                 sum_fin_pnd += bk_fin_c * v
 
+            # Salida por clase (Path D): limite economico propio, sin ponderar
+            if clase in salidas_clase and not np.isnan(bk_fin_c):
+                salidas_clase[clase] = bk_fin_c
+
         # Campo Brent-insensible: todas las clases presentes son BRENT_INSENSITIVE
         brent_insens = (n_clases > 0) and (n_insensibles == n_clases)
 
@@ -514,6 +572,8 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
             "BREAKEVEN_OPERACIONAL_USD_BBL":  bk_op_pond,
             "BK_ANCLA_FIN_USD_BBL":           bk_ancla_fin,
             "BK_ANCLA_PDP_USD_BBL":           bk_ancla_pdp,
+            "BK_SALIDA_PNP_USD_BBL":          salidas_clase["D-PNP"],
+            "BK_SALIDA_PND_USD_BBL":          salidas_clase["D-PND"],
             "BRENT_INSENSITIVE":              brent_insens,
             "ALERTA_BK":                      alerta_bk,
         })
@@ -603,6 +663,7 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
         df_bk_pond[["CAMPO", "VIGENCIA_BREAKEVEN",
                     "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
                     "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL",
+                    "BK_SALIDA_PNP_USD_BBL", "BK_SALIDA_PND_USD_BBL",
                     "BRENT_INSENSITIVE", "ALERTA_BK"]].rename(
                         columns={"VIGENCIA_BREAKEVEN": "_VIG_BK"}),
         on=["CAMPO", "_VIG_BK"], how="left"
@@ -635,8 +696,10 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
     tablon.drop(columns=["ALERTA_BK"], inplace=True)
 
     # ── 7. Columnas de prediccion (se llenan en 03_modelo.py) ─────────────────
-    for col in ["PRED_XGBOOST_MBPE", "PRED_ISOTONICA_MBPE",
-                "DELTA_XGBOOST_VS_OFICIAL", "DELTA_ISOTONICA_VS_OFICIAL"]:
+    # Motor PRIMARIO = Isotonica; motor VALIDACION = Suave (PCHIP). XGBoost retirado
+    # (ver 03_modelo.py: en 1D era el peor del benchmark y su restriccion invertia signo).
+    for col in ["PRED_ISOTONICA_MBPE", "PRED_SUAVE_MBPE",
+                "DELTA_ISOTONICA_VS_OFICIAL", "DELTA_SUAVE_VS_OFICIAL"]:
         tablon[col] = np.nan
 
     # ── 8. Orden canonico de columnas ─────────────────────────────────────────
@@ -650,10 +713,11 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
         "VOLUMEN_1P_SENSIBILIDAD_MBPE", "DELTA_SENS_MBPE",
         "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
         "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL",
+        "BK_SALIDA_PNP_USD_BBL", "BK_SALIDA_PND_USD_BBL",
         "BRENT_INSENSITIVE",
         "VIGENCIA_BREAKEVEN",
-        "PRED_XGBOOST_MBPE", "PRED_ISOTONICA_MBPE",
-        "DELTA_XGBOOST_VS_OFICIAL", "DELTA_ISOTONICA_VS_OFICIAL",
+        "PRED_ISOTONICA_MBPE", "PRED_SUAVE_MBPE",
+        "DELTA_ISOTONICA_VS_OFICIAL", "DELTA_SUAVE_VS_OFICIAL",
         "ALERTA",
     ]
     for col in orden:
