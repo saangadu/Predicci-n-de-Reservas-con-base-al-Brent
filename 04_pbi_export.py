@@ -592,6 +592,64 @@ if __name__ == "__main__":
             print(peores.nlargest(5, "_dif")[["CAMPO", "MOTOR", "VOLUMEN_1P_PREDICHO_MBPE",
                                               "VOLUMEN_1P_BASELINE_MBPE"]].to_string(index=False))
 
+    # ── Ledger de cobertura (transparencia para decisiones CAPEX) ────────────────
+    # Cada campo del baseline aparece con su estado y motivo de ausencia.
+    # Motivos: sin_consolidado (sin tabla sensibilidad forward, mayoria activos US/gas),
+    #          filial_migracion (padre perdio cert 2024/25 a entidad " FILIAL"),
+    #          consolidado_sin_sens (tiene CONSOLIDADO pero sin vol sensibilidad),
+    #          presente (incluido en la matriz de prediccion).
+    presentes_en_matriz = set(df_out["CAMPO"].unique())
+    # nombre de la columna AÑO (puede tener encoding raro en el parquet)
+    _col_anio = next((c for c in df.columns if c in ("AÑO",) or
+                      (c.startswith("A") and c.endswith("O") and len(c) <= 4)), None)
+
+    rows_cob = []
+    for campo, vol in baselines.items():
+        if campo in presentes_en_matriz:
+            motivo = "presente"
+        else:
+            sub = df[df["CAMPO"] == campo]
+            cons = sub[sub["ESCENARIO"].str.startswith("CONSOLIDADO", na=False)]
+            n_cons = len(cons)
+            n_sens = int(cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna().sum())
+            # Tiene certificado reciente 2024/2025 en el padre?
+            b2425 = (sub[(sub["ESCENARIO"] == "BASE") &
+                         sub[_col_anio].isin([2024, 2025])]
+                     if _col_anio else sub.iloc[0:0])
+            tiene_base_reciente = bool(b2425["VOLUMEN_1P_OFICIAL_MBPE"].notna().any())
+            if n_cons == 0:
+                motivo = "sin_consolidado"
+            elif n_sens > 0 and not tiene_base_reciente:
+                motivo = "filial_migracion"
+            else:
+                motivo = "consolidado_sin_sens"
+        rows_cob.append({"CAMPO": campo,
+                         "BASELINE_1P_MBPE": round(float(vol), 2),
+                         "EN_PREDICCION": campo in presentes_en_matriz,
+                         "MOTIVO_AUSENCIA": motivo})
+
+    df_cob = pd.DataFrame(rows_cob).sort_values(
+        ["EN_PREDICCION", "BASELINE_1P_MBPE"], ascending=[True, False])
+    ruta_cob = RESULTADOS / "cobertura_portafolio.csv"
+    df_cob.to_csv(ruta_cob, index=False, encoding="utf-8-sig")
+
+    total_mbpe = df_cob["BASELINE_1P_MBPE"].sum()
+    pres_mbpe  = df_cob[df_cob["EN_PREDICCION"]]["BASELINE_1P_MBPE"].sum()
+    print(f"\n{'='*55}")
+    print(f"  COBERTURA DEL PORTAFOLIO  ({ruta_cob.name})")
+    print(f"{'='*55}")
+    print(f"  Total baseline:  {len(df_cob):3d} campos | {total_mbpe:.1f} MBPE")
+    print(f"  En prediccion:   {df_cob['EN_PREDICCION'].sum():3d} campos | "
+          f"{pres_mbpe:.1f} MBPE ({100*pres_mbpe/total_mbpe:.1f}%)")
+    for mot, desc in [("sin_consolidado",    "sin datos fuente    "),
+                      ("filial_migracion",   "migr. FILIAL recup. "),
+                      ("consolidado_sin_sens", "Consol. sin sensib. ")]:
+        sub_m = df_cob[df_cob["MOTIVO_AUSENCIA"] == mot]
+        if not sub_m.empty:
+            print(f"  Ausente {desc}: {len(sub_m):3d} campos | "
+                  f"{sub_m['BASELINE_1P_MBPE'].sum():.1f} MBPE")
+    print(f"{'='*55}\n")
+
     brent_ref = round((brent_obs_min + brent_obs_max) / 2)
     comp = generar_comparacion_vs_anterior(df_out, q_objetivo, brent_ref, ruta_snapshot)
     actualizar_changelog(q_objetivo, fecha_prediccion, len(campos), comp)
