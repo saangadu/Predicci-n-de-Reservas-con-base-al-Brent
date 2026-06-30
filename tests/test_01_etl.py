@@ -252,7 +252,7 @@ def test_columnas_obligatorias(tablon):
         "VOLUMEN_1P_OFICIAL_MBPE", "BASELINE_1P_VIGENCIA_MBPE",
         "VOLUMEN_1P_SENSIBILIDAD_MBPE", "DELTA_SENS_MBPE",
         "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
-        "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL",
+        "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL", "BK_ANCLA_CLASE",
         "VIGENCIA_BREAKEVEN", "ALERTA",
     ]
     faltantes = [c for c in obligatorias if c not in tablon.columns]
@@ -275,6 +275,37 @@ def test_breakeven_swap_financiero_mayor_operacional(tablon):
             continue
         assert bk_fin.iloc[0] > bk_pdp.iloc[0], \
             f"{campo}: BK_ANCLA_FIN ({bk_fin.iloc[0]}) <= BK_ANCLA_PDP ({bk_pdp.iloc[0]})"
+
+
+def test_bk_ancla_clase_mayor_incertidumbre(tablon):
+    """
+    BK_ANCLA_FIN (2026-06-11) usa el criterio de clase de mayor incertidumbre
+    (PND>PNP>PDP). El valor anclado debe ser EXACTAMENTE el BK financiero por clase
+    de la clase declarada en BK_ANCLA_CLASE (no un promedio ponderado). Verificamos
+    la coherencia para el gate dorado, cuyas anclas vienen de PND.
+    """
+    u = tablon.drop_duplicates(["CAMPO", "VIGENCIA_BREAKEVEN"])
+    # Todo registro con ancla FIN definida debe declarar la clase que la fijo
+    con_ancla = u[u["BK_ANCLA_FIN_USD_BBL"].notna()]
+    sin_clase = con_ancla[con_ancla["BK_ANCLA_CLASE"].isna()]
+    assert sin_clase.empty, \
+        f"Anclas FIN sin BK_ANCLA_CLASE: {sin_clase['CAMPO'].tolist()}"
+    # Las clases validas son las tres reservas o el fallback
+    validas = {"D-PND", "D-PNP", "D-PDP", "FALLBACK_GLOBAL"}
+    invalidas = set(con_ancla["BK_ANCLA_CLASE"].unique()) - validas
+    assert not invalidas, f"BK_ANCLA_CLASE con valores invalidos: {invalidas}"
+    # Gate dorado: el ancla debe coincidir con la salida por clase declarada
+    # (PND -> BK_SALIDA_PND, PNP -> BK_SALIDA_PNP)
+    salida_col = {"D-PND": "BK_SALIDA_PND_USD_BBL", "D-PNP": "BK_SALIDA_PNP_USD_BBL"}
+    for campo in CAMPOS_GATE:
+        sub = u[u["CAMPO"] == campo]
+        for _, fila in sub.iterrows():
+            clase = fila["BK_ANCLA_CLASE"]
+            col = salida_col.get(clase)
+            if col is None or pd.isna(fila[col]):
+                continue
+            assert fila["BK_ANCLA_FIN_USD_BBL"] == pytest.approx(fila[col]), \
+                f"{campo}: BK_ANCLA_FIN != BK_SALIDA de la clase {clase}"
 
 
 def test_escalera_degenerada_colapsa_pisos(tablon):

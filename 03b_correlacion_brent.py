@@ -1,39 +1,47 @@
 """
-03b_correlacion_brent.py — Modelo 2: Precio Neto = g(Brent) por campo
+03b_correlacion_brent.py — Modelo 2: Precio Aceite = g(Brent) por campo
 
-Segundo modelo de la arquitectura de 2 (directriz 2026-06-11). Traduce el marcador Brent
-al PRECIO NETO realizado de cada campo, que es la entrada del Modelo 1 (03_modelo.py).
-Componiendo ambos se obtiene Brent -> Precio Neto -> Delta Reservas (lo hace 04).
+Segundo modelo de la arquitectura de 2 (directriz 2026-06-11; reformado 2026-06-12).
+Traduce el marcador Brent al PRECIO ACEITE realizado de cada campo (columna
+PRECIO_NETO_USD_BBL del tablon), que es la entrada del Modelo 1 (03_modelo.py).
+Componiendo ambos se obtiene Brent -> Precio Aceite -> Delta Reservas (lo hace 04).
 
-POR QUE UNA REGRESION DIRECTA Neto = α + β·Brent (y no descuentos separados):
+POR QUE UNA REGRESION DIRECTA Aceite = α + β·Brent (y no descuentos separados):
   La literatura (World Bank/ESMAP 2005) muestra que el diferencial de calidad se AMPLIA
   con el nivel de precio (terminos de interaccion descuento×Brent). Pero al ajustar eso
   POR CAMPO con datos anuales la señal es demasiado ruidosa: en 154 campos con n>=6, la
   pendiente del descuento de calidad vs Brent es significativa (p<0.10) solo en el 16%.
-  En cambio, la regresion directa Neto = α + β·Brent logra R² mediano 0.916 (82% de campos
-  > 0.8) y supera a "descuentos separados" y "proporcional" en los 154 campos. El termino
-  β (<1 tipicamente) ABSORBE implicitamente la ampliacion del descuento con el precio.
+  La regresion directa absorbe los descuentos implicitamente en β (<1 tipicamente).
+  Los descuentos quedan AISLADOS del flujo de prediccion (directriz 2026-06-12).
+
+SOLO PUNTOS HIST REALES (directriz 2026-06-12):
+  La recta se ajusta unicamente con cierres anuales certificados (ES_BASELINE, precios
+  realizados, Brent $43-98). Los 9 quarters del Consolidado se EXCLUYEN: son pronosticos
+  independientes apilados en banda Brent $68-82 — sin dispersion en X no aportan
+  pendiente, solo varianza vertical. Evidencia (160 campos comparables): R² mediano
+  0.909 -> 0.967; campos R²>0.9 de 85 -> 141 al excluirlos (LOS ACEITES 0.31 -> 0.97).
 
 METODO:
-  - Theil-Sen (regresion robusta a outliers; mediana de pendientes) por campo, con puntos
-    reales BASE (cierres anuales) + Consolidado (quarters). Robustez necesaria con N~8-18
-    y algun trimestre atipico.
-  - Monotonia: se exige β>0 (Brent↑ -> Neto↑), invariante para que la composicion con el
-    Modelo 1 preserve Brent↑ -> Delta↑. Si Theil-Sen da β<=0, se degrada a proporcional.
-
-ESCENARIOS (reemplazan los P10/P90 de descuentos del diseño anterior):
-  Banda = recta ± cuantiles de los RESIDUALES (Neto_obs − Neto_hat):
-    BASE = α + β·Brent ; BAJO = BASE + P10_resid ; ALTO = BASE + P90_resid
-  Asi el descuento implicito (Brent − Neto) VARIA con el Brent en cada escenario, en vez
-  de ser una constante historica desligada del precio.
+  - Theil-Sen (regresion robusta a outliers; mediana de pendientes) por campo.
+  - Monotonia: se exige β>0 (Brent↑ -> Aceite↑), invariante para que la composicion con
+    el Modelo 1 preserve Brent↑ -> Delta↑. Si Theil-Sen da β<=0, se degrada a proporcional.
+  - Sin escenarios BAJO/ALTO (retirados 2026-06-12): una sola recta BASE.
 
 DEGRADACION (n insuficiente):
   n>=5  -> Theil-Sen.
-  2<=n<5 -> proporcional Neto = k·Brent (k = mediana de Neto/Brent; k>0 garantizado).
-  n<2   -> medianas historicas: Neto = Brent + med_cal + med_tra (ALERTA=FALLBACK_MEDIANAS).
+  2<=n<5 -> proporcional Aceite = k·Brent (k = mediana de Aceite/Brent; k>0 garantizado).
+  n<2   -> fallback de portafolio: Aceite = k_portafolio·Brent, con k_portafolio =
+           mediana de β de los campos THEILSEN validos (METODO=FALLBACK_BETA_PORTAFOLIO,
+           ES_FALLBACK=True, ALERTA=SIN_HIST_FALLBACK_BETA). Reemplaza el fallback de
+           medianas de descuentos (retirado: los descuentos salen del flujo).
+
+METRICAS (por campo, en correlacion_brent.csv):
+  R2 / RMSE        : bondad de ajuste in-sample (optimista con N pequeño).
+  R2_LOO / MAE_LOO : validacion out-of-sample (LOO-CV de la recta) — generalizacion real.
+  ES_FALLBACK      : True si el campo no tiene relacion propia (tag visible hasta el export).
 
 Salidas:
-  datos/staging/correlacion_brent.csv   (coeficientes + bandas + descuento implicito @Brent ref)
+  datos/staging/correlacion_brent.csv   (coeficientes + metricas + descuento implicito)
   resultados/correlacion_brent.csv      (espejo para Power BI)
   datos/staging/plots_correlacion/<campo>.png  (gate dorado + top materiales)
   resultados/plots_analisis/correlacion_brent_resumen.png
@@ -59,24 +67,60 @@ PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 PLOTS_ANAL.mkdir(parents=True, exist_ok=True)
 
 N_MIN_THEILSEN = 5    # minimo de puntos para Theil-Sen robusto
-N_MIN_PROP     = 2    # minimo para proporcional Neto=k*Brent
+N_MIN_PROP     = 2    # minimo para proporcional Aceite=k*Brent
 GATE_DORADO    = ["CASTILLA", "CASTILLA NORTE", "CASTILLA ESTE", "RUBIALES"]
-
-ESCENARIOS = ["BAJO", "BASE", "ALTO"]
 
 
 def datos_reales_campo(df: pd.DataFrame) -> pd.DataFrame:
-    """Puntos reales con Brent y Precio Neto disponibles (BASE anual + Consolidado).
-    Se excluyen sinteticos (no aportan a la formacion de precio)."""
+    """Puntos HIST reales (cierres anuales BASE con precio REALIZADO). Se excluyen
+    sinteticos y quarters Consolidado: los quarters son pronosticos apilados en banda
+    Brent $68-82 que contaminan la pendiente (decision 2026-06-12, MAESTRO §10)."""
     return df[(~df["ES_SINTETICO"]) &
+              df["ES_BASELINE"] &
               df["BRENT_FLAT_USD_BBL"].notna() &
               df["PRECIO_NETO_USD_BBL"].notna()].copy()
 
 
-def ajustar_campo(g: pd.DataFrame, med_cal: float, med_tra: float) -> dict:
+def _loo_recta(b: np.ndarray, y: np.ndarray, metodo: str) -> tuple[float, float]:
     """
-    Ajusta Neto = g(Brent) para un campo. Retorna coeficientes, bandas de residuales,
-    metricas y metodo. Garantiza pendiente positiva (degrada si no).
+    LOO-CV de la recta Neto=g(Brent): deja un punto fuera, reajusta con el MISMO metodo
+    sobre el resto, predice el punto excluido y acumula el error out-of-sample.
+
+    Devuelve (MAE_LOO, R2_LOO). R2_LOO compara el SS de los residuales LOO contra la
+    varianza total (1 = perfecto; <=0 = no supera predecir la media). Mide capacidad
+    GENERALIZADORA de la recta, a diferencia de R²/RMSE in-sample (optimistas con N~8).
+    """
+    n = len(b)
+    if n < 4 or np.ptp(b) <= 1e-6:
+        return np.nan, np.nan  # muy pocos puntos para un hold-out informativo
+    errores = []
+    for i in range(n):
+        b_tr = np.delete(b, i); y_tr = np.delete(y, i)
+        if np.ptp(b_tr) <= 1e-6:
+            continue
+        if metodo == "THEILSEN":
+            s, a, _, _ = stats.theilslopes(y_tr, b_tr)
+            if s <= 0:  # mismo guard que el ajuste global: degradar a proporcional
+                s = float(np.median(y_tr / np.where(b_tr == 0, np.nan, b_tr))); a = 0.0
+        else:  # PROPORCIONAL
+            s = float(np.median(y_tr / np.where(b_tr == 0, np.nan, b_tr))); a = 0.0
+        errores.append(y[i] - (a + s * b[i]))
+    if not errores:
+        return np.nan, np.nan
+    errores = np.asarray(errores, dtype=float)
+    mae_loo = float(np.mean(np.abs(errores)))
+    ss_res  = float(np.sum(errores ** 2))
+    ss_tot  = float(np.sum((y - np.mean(y)) ** 2))
+    r2_loo  = (1 - ss_res / ss_tot) if ss_tot > 1e-9 else np.nan
+    return mae_loo, r2_loo
+
+
+def ajustar_campo(g: pd.DataFrame) -> dict:
+    """
+    Ajusta Aceite = g(Brent) para un campo con sus puntos HIST. Retorna coeficientes,
+    metricas y metodo. Garantiza pendiente positiva (degrada si no). Con n<2 marca
+    PENDIENTE_FALLBACK: la segunda pasada del __main__ le asigna el k de portafolio
+    (no se puede resolver aqui porque requiere los β de todos los campos).
     """
     b = g["BRENT_FLAT_USD_BBL"].values.astype(float)
     y = g["PRECIO_NETO_USD_BBL"].values.astype(float)
@@ -88,7 +132,7 @@ def ajustar_campo(g: pd.DataFrame, med_cal: float, med_tra: float) -> dict:
         slope, intercept, _, _ = stats.theilslopes(y, b)
         metodo = "THEILSEN"
         if slope <= 0:
-            # Pendiente no positiva: viola Brent↑->Neto↑. Degradar a proporcional.
+            # Pendiente no positiva: viola Brent↑->Aceite↑. Degradar a proporcional.
             slope = float(np.median(y / np.where(b == 0, np.nan, b)))
             intercept = 0.0
             metodo = "PROPORCIONAL"
@@ -99,91 +143,66 @@ def ajustar_campo(g: pd.DataFrame, med_cal: float, med_tra: float) -> dict:
         metodo = "PROPORCIONAL"
         alerta = "POCOS_PUNTOS"
     else:
-        # Sin datos para regresion: usar medianas de descuento historicas
-        slope = 1.0
-        intercept = float(med_cal + med_tra)   # Neto = Brent + cal + tra (cal,tra<0)
-        metodo = "FALLBACK_MEDIANAS"
-        alerta = "FALLBACK_MEDIANAS"
+        # Sin historia de precio: se resuelve en la segunda pasada (k de portafolio)
+        slope = np.nan
+        intercept = 0.0
+        metodo = "PENDIENTE_FALLBACK"
+        alerta = "SIN_HIST_FALLBACK_BETA"
 
     # Residuales y metricas de ajuste
-    y_hat = intercept + slope * b
-    resid = y - y_hat
-    rmse = float(np.sqrt(np.mean(resid ** 2))) if n > 0 else np.nan
-    ss_res = float(np.sum(resid ** 2))
-    ss_tot = float(np.sum((y - np.mean(y)) ** 2)) if n > 1 else 0.0
-    r2 = (1 - ss_res / ss_tot) if ss_tot > 1e-9 else np.nan
-
-    # Cuantiles de residuales para las bandas BAJO/ALTO. Con n pequeño, P10/P90 colapsan
-    # a min/max (mismo orden semantico, sin inventar colas).
-    if n >= 5:
-        q10, q50, q90 = (float(np.percentile(resid, 10)),
-                         float(np.percentile(resid, 50)),
-                         float(np.percentile(resid, 90)))
-    elif n >= 2:
-        q10, q50, q90 = float(np.min(resid)), 0.0, float(np.max(resid))
+    if metodo != "PENDIENTE_FALLBACK":
+        y_hat = intercept + slope * b
+        resid = y - y_hat
+        rmse = float(np.sqrt(np.mean(resid ** 2))) if n > 0 else np.nan
+        ss_res = float(np.sum(resid ** 2))
+        ss_tot = float(np.sum((y - np.mean(y)) ** 2)) if n > 1 else 0.0
+        r2 = (1 - ss_res / ss_tot) if ss_tot > 1e-9 else np.nan
+        mae_loo, r2_loo = _loo_recta(b, y, metodo)
     else:
-        q10 = q50 = q90 = 0.0
+        rmse = r2 = mae_loo = r2_loo = np.nan
 
     return {
         "N_PUNTOS":       n,
         "METODO":         metodo,
         "ALPHA":          round(intercept, 4),
-        "BETA":           round(slope, 4),
+        "BETA":           round(slope, 4) if pd.notna(slope) else None,
         "R2":             round(r2, 4) if pd.notna(r2) else None,
         "RMSE":           round(rmse, 3) if pd.notna(rmse) else None,
-        "RESID_P10":      round(q10, 3),
-        "RESID_P50":      round(q50, 3),
-        "RESID_P90":      round(q90, 3),
+        "R2_LOO":         round(r2_loo, 4) if pd.notna(r2_loo) else None,
+        "MAE_LOO":        round(mae_loo, 3) if pd.notna(mae_loo) else None,
         "BRENT_MIN_OBS":  round(float(b.min()), 2) if n > 0 else None,
         "BRENT_MAX_OBS":  round(float(b.max()), 2) if n > 0 else None,
+        "ES_FALLBACK":    metodo == "PENDIENTE_FALLBACK",
         "ALERTA":         alerta,
     }
 
 
-def neto_desde_brent(coef: dict, brent, escenario: str = "BASE") -> np.ndarray:
+def neto_desde_brent(coef: dict, brent) -> np.ndarray:
     """
-    Predictor del Modelo 2: convierte Brent -> Precio Neto para un campo y escenario.
-    Importable desde 04_pbi_export.py para componer Brent -> Neto -> Delta.
-
-      BASE = α + β·Brent (recta Theil-Sen, estimacion central)
-      BAJO = BASE + (RESID_P10 − RESID_P50)   (offset <= 0)
-      ALTO = BASE + (RESID_P90 − RESID_P50)   (offset >= 0)
-
-    Las bandas se centran en la MEDIANA de residuales (no en 0): Theil-Sen minimiza la
-    mediana de |residuales|, no su media, por lo que P10/P90 crudos pueden no bracketar
-    el 0 y romper el orden BAJO<=BASE<=ALTO (caso CARIBE). Centrar en P50 garantiza el
-    orden por construccion (P10<=P50<=P90) preservando el ancho del spread observado.
+    Predictor del Modelo 2: convierte Brent -> Precio Aceite para un campo.
+    Importable desde 03_modelo.py (p_ref del re-anclaje) y 04_pbi_export.py
+    (composicion Brent -> Aceite -> Delta). Sin escenarios desde 2026-06-12.
     """
     brent = np.asarray(brent, dtype=float)
-    base = coef["ALPHA"] + coef["BETA"] * brent
-    if escenario == "BAJO":
-        return base + (coef["RESID_P10"] - coef["RESID_P50"])
-    if escenario == "ALTO":
-        return base + (coef["RESID_P90"] - coef["RESID_P50"])
-    return base
+    return coef["ALPHA"] + coef["BETA"] * brent
 
 
 def plot_campo(campo: str, g: pd.DataFrame, coef: dict) -> None:
-    """Scatter Brent vs Neto + recta Theil-Sen + banda de escenarios."""
+    """Scatter Brent vs Aceite + recta Theil-Sen (sin bandas desde 2026-06-12)."""
     b = g["BRENT_FLAT_USD_BBL"].values.astype(float)
     y = g["PRECIO_NETO_USD_BBL"].values.astype(float)
     grid = np.linspace(b.min() - 5, b.max() + 10, 100) if len(b) else np.linspace(40, 100, 100)
 
     fig, ax = plt.subplots(figsize=(9, 6))
-    ax.scatter(b, y, color="steelblue", s=60, zorder=5, label=f"Reales (n={coef['N_PUNTOS']})")
-    ax.plot(grid, neto_desde_brent(coef, grid, "BASE"), color="darkorange",
-            linewidth=2, label=f"BASE: Neto={coef['ALPHA']:.1f}+{coef['BETA']:.2f}·Brent")
-    ax.plot(grid, neto_desde_brent(coef, grid, "ALTO"), color="green",
-            linewidth=1, linestyle="--", label="ALTO (P90 resid)")
-    ax.plot(grid, neto_desde_brent(coef, grid, "BAJO"), color="firebrick",
-            linewidth=1, linestyle="--", label="BAJO (P10 resid)")
-    ax.fill_between(grid, neto_desde_brent(coef, grid, "BAJO"),
-                    neto_desde_brent(coef, grid, "ALTO"), color="orange", alpha=0.12)
-    # Linea Neto=Brent (descuento cero) como referencia
-    ax.plot(grid, grid, color="gray", linewidth=0.8, alpha=0.5, label="Neto=Brent (desc=0)")
+    ax.scatter(b, y, color="steelblue", s=60, zorder=5,
+               label=f"Reales HIST (n={coef['N_PUNTOS']})")
+    ax.plot(grid, neto_desde_brent(coef, grid), color="darkorange",
+            linewidth=2, label=f"Aceite={coef['ALPHA']:.1f}+{coef['BETA']:.2f}·Brent")
+    # Linea Aceite=Brent (descuento cero) como referencia
+    ax.plot(grid, grid, color="gray", linewidth=0.8, alpha=0.5, label="Aceite=Brent (desc=0)")
     ax.set_xlabel("Brent Flat (USD/bbl)")
-    ax.set_ylabel("Precio Neto (USD/bbl)")
-    ax.set_title(f"{campo} — Modelo 2: Neto = g(Brent)  "
+    ax.set_ylabel("Precio Aceite (USD/bbl)")
+    ax.set_title(f"{campo} — Modelo 2: Aceite = g(Brent)  "
                  f"[{coef['METODO']}, R2={coef['R2']}]")
     ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -221,18 +240,13 @@ def plot_resumen(df_coef: pd.DataFrame) -> None:
 
 
 if __name__ == "__main__":
-    print("=== 03b_correlacion_brent.py — Modelo 2: Neto = g(Brent) ===\n")
+    print("=== 03b_correlacion_brent.py — Modelo 2: Aceite = g(Brent) ===\n")
     ruta = STAGING / "tablon_unico.parquet"
     if not ruta.exists():
         raise FileNotFoundError("Ejecutar 01_etl.py primero.")
     df = pd.read_parquet(ruta)
 
     df_real = datos_reales_campo(df)
-
-    # Medianas de descuento por campo (fallback cuando no hay puntos para regresion)
-    medianas = (df_real.groupby("CAMPO")[["DESCUENTO_CALIDAD_USD_BBL",
-                                          "DESCUENTO_TRANSPORTE_USD_BBL"]]
-                .median().to_dict(orient="index"))
 
     # Brent de referencia para reportar el descuento implicito (mediana del Consolidado real)
     cons = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"]) & df["BRENT_FLAT_USD_BBL"].notna()]
@@ -242,24 +256,32 @@ if __name__ == "__main__":
     campos = sorted(df["CAMPO"].unique())
     for campo in campos:
         g = df_real[df_real["CAMPO"] == campo]
-        med = medianas.get(campo, {})
-        med_cal = float(med.get("DESCUENTO_CALIDAD_USD_BBL", -7.0))
-        med_tra = float(med.get("DESCUENTO_TRANSPORTE_USD_BBL", -3.3))
-        coef = ajustar_campo(g, med_cal, med_tra)
-
-        # Descuento implicito @Brent ref para auditoria (Brent − Neto, positivo)
-        neto_ref = float(neto_desde_brent(coef, np.array([brent_ref]), "BASE")[0])
-        desc_impl = brent_ref - neto_ref
-
-        registros.append({
-            "CAMPO":             campo,
-            **coef,
-            "BRENT_REF":         round(brent_ref, 2),
-            "NETO_REF_BASE":     round(neto_ref, 2),
-            "DESCUENTO_IMPLICITO_REF": round(desc_impl, 2),
-        })
+        registros.append({"CAMPO": campo, **ajustar_campo(g)})
 
     df_coef = pd.DataFrame(registros)
+
+    # Segunda pasada: fallback de portafolio para campos sin historia de precio.
+    # k = mediana del ratio Aceite/Brent implicito de las rectas Theil-Sen evaluadas
+    # en el Brent de referencia ((α+β·ref)/ref). La β sola sobreestima (mediana ~1.13
+    # porque α<0 tipico la compensa); el ratio en el punto de operacion es la
+    # relacion tipica realizada del portafolio. Sin descuentos no hay otra fuente.
+    ts = df_coef[df_coef["METODO"] == "THEILSEN"]
+    if not ts.empty:
+        ratios = (ts["ALPHA"] + ts["BETA"] * brent_ref) / brent_ref
+        k_portafolio = round(float(ratios.median()), 4)
+    else:
+        k_portafolio = 1.0
+    mask_fb = df_coef["METODO"] == "PENDIENTE_FALLBACK"
+    df_coef.loc[mask_fb, ["ALPHA", "BETA", "METODO"]] = [0.0, k_portafolio,
+                                                         "FALLBACK_BETA_PORTAFOLIO"]
+    print(f"  k_portafolio (mediana ratio Aceite/Brent @ref de THEILSEN) = {k_portafolio}  "
+          f"-> aplicado a {int(mask_fb.sum())} campos sin historia (ES_FALLBACK=True)")
+
+    # Descuento implicito @Brent ref para auditoria (Brent − Aceite, positivo)
+    df_coef["BRENT_REF"] = round(brent_ref, 2)
+    df_coef["NETO_REF_BASE"] = (df_coef["ALPHA"] + df_coef["BETA"] * brent_ref).round(2)
+    df_coef["DESCUENTO_IMPLICITO_REF"] = (brent_ref - df_coef["NETO_REF_BASE"]).round(2)
+
     df_coef.to_csv(STAGING / "correlacion_brent.csv", index=False, encoding="utf-8-sig")
     df_coef.to_csv(RESULTADOS / "correlacion_brent.csv", index=False, encoding="utf-8-sig")
     print(f"  Coeficientes: {RESULTADOS / 'correlacion_brent.csv'}  ({len(df_coef)} campos)")
@@ -272,14 +294,19 @@ if __name__ == "__main__":
     if not val.empty:
         print(f"\n  Theil-Sen (n={len(val)}): beta mediana={val['BETA'].median():.3f}  "
               f"R2 mediana={val['R2'].median():.3f}  "
-              f"R2>0.8: {(val['R2'] > 0.8).mean():.0%}")
+              f"R2>0.9: {(val['R2'] > 0.9).mean():.0%}")
+        r2loo = val["R2_LOO"].dropna()
+        if not r2loo.empty:
+            print(f"  LOO-CV: R2_LOO mediana={r2loo.median():.3f}  "
+                  f"MAE_LOO mediana={val['MAE_LOO'].median():.2f} USD/bbl")
     print(f"\n  Gate dorado:")
     for campo in GATE_DORADO:
         r = df_coef[df_coef["CAMPO"] == campo]
         if not r.empty:
             r = r.iloc[0]
-            print(f"    {campo:<16} Neto = {r['ALPHA']:.2f} + {r['BETA']:.3f}*Brent  "
-                  f"[{r['METODO']}, R2={r['R2']}, desc_impl@{brent_ref:.0f}={r['DESCUENTO_IMPLICITO_REF']:.1f}]")
+            print(f"    {campo:<16} Aceite = {r['ALPHA']:.2f} + {r['BETA']:.3f}*Brent  "
+                  f"[{r['METODO']}, R2={r['R2']}, R2_LOO={r['R2_LOO']}, "
+                  f"desc_impl@{brent_ref:.0f}={r['DESCUENTO_IMPLICITO_REF']:.1f}]")
 
     # Plots: gate dorado + top-6 materiales por baseline
     print("\n  Generando plots...")

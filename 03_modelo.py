@@ -10,7 +10,15 @@ ARQUITECTURA DE 2 MODELOS (directriz 2026-06-11):
     composicion en 04_pbi_export.py.
 
 TARGET: DELTA_SENS_MBPE = ΔReservas = Sensibilidad − Baseline_vigencia.
-Prediccion final: VOLUMEN_1P_PRED = BASELINE_LATEST + DELTA_PRED.
+
+PREDICCION FINAL CON RE-ANCLAJE (decision 2026-06-12, MAESTRO §7.0/§10):
+    VOLUMEN_1P_PRED(p) = max(BASELINE_LATEST + [f(p) − f(p_ref)], 0)
+    p_ref = M2_campo(BRENT_REF);  BRENT_REF = Brent del ultimo quarter conocido.
+    Piso duro: p < BK_ANCLA_PDP -> 0.
+  El modelo aprende deltas contra el baseline de CADA vigencia; su promedio al precio
+  actual no es 0 (niveles distintos por deplecion/revisiones). El re-anclaje impone la
+  identidad financiera: a precio actual, reservas = ultimo 1P certificado. Requiere
+  correlacion_brent.csv -> 03b corre ANTES que este script en run_pipeline.
 
 MOTORES (elegidos por benchmark_modelo1.py, LOO-CV sobre 114 campos):
   - PRIMARIO  : Isotonica (MotorIsotonico) — menor MAE, respeta la escalera de anclas,
@@ -41,7 +49,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from motores_modelo1 import MotorIsotonico, MotorSuave
+from motores_modelo1 import MotorIsotonico, MotorSuave, volumen_anclado
 
 BASE_DIR    = Path(__file__).parent
 STAGING     = BASE_DIR / "datos" / "staging"
@@ -209,12 +217,16 @@ def _anclas_campo(df_campo: pd.DataFrame) -> tuple:
 def generar_plot(campo: str, df_campo: pd.DataFrame,
                  iso_model, suave_model,
                  medianas_px: dict, baseline_latest: float,
-                 baseline_pdp: float = 0.0) -> None:
+                 baseline_pdp: float = 0.0,
+                 p_ref: float = None,
+                 delta_ref_iso: float = 0.0,
+                 delta_ref_su: float = 0.0) -> None:
     """
     Plot de validacion. Eje X = PRECIO NETO (la variable nativa del Modelo 1). Eje X
     superior secundario = Brent equivalente usando las medianas de descuento del campo
     (solo referencia visual; la conversion formal Brent↔Neto la hace el Modelo 2).
-    Panel izq = espacio delta; panel der = volumen absoluto reconstruido (baseline+delta).
+    Panel izq = espacio delta (modelo crudo); panel der = volumen absoluto ANCLADO
+    (baseline + delta − delta_ref, decision 2026-06-12) con marcador en (p_ref, baseline).
     """
     bk_fin, bk_pdp, _ = _anclas_campo(df_campo)
 
@@ -226,10 +238,13 @@ def generar_plot(campo: str, df_campo: pd.DataFrame,
     pneto_max = df_campo[FEATURE].max() + 10
     pneto_grid = np.linspace(pneto_min, pneto_max, 200)
 
+    _bk_plot = bk_pdp if bk_fin is not None else None
     curva_iso_delta = iso_model.predict(pneto_grid)
     curva_su_delta  = suave_model.predict(pneto_grid)
-    curva_iso_abs   = np.maximum(baseline_latest + curva_iso_delta, 0)
-    curva_su_abs    = np.maximum(baseline_latest + curva_su_delta, 0)
+    curva_iso_abs   = volumen_anclado(iso_model, pneto_grid, baseline_latest,
+                                      delta_ref_iso, _bk_plot)
+    curva_su_abs    = volumen_anclado(suave_model, pneto_grid, baseline_latest,
+                                      delta_ref_su, _bk_plot)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
@@ -285,6 +300,9 @@ def generar_plot(campo: str, df_campo: pd.DataFrame,
              linewidth=1.5, linestyle="--", label="Suave (absoluto)")
     ax2.axhline(y=baseline_latest, color="purple", linewidth=1.0, linestyle=":",
                 label=f"Baseline={baseline_latest:.0f}")
+    if p_ref is not None and pd.notna(baseline_latest):
+        ax2.scatter([p_ref], [baseline_latest], color="green", marker="*", s=180,
+                    zorder=7, label=f"Ancla actual (p_ref={p_ref:.1f})")
     if bk_fin is not None:
         ax2.axvline(x=bk_fin, color="gray", linestyle=":", linewidth=1.5)
         ax2.scatter([bk_fin], [baseline_latest], color="gray", marker="v",
@@ -449,6 +467,25 @@ if __name__ == "__main__":
                      .groupby("CAMPO")["VOLUMEN_PDP_MBPE"]
                      .last().to_dict())
 
+    # ── Re-anclaje (2026-06-12): p_ref por campo = M2(BRENT_REF) ─────────────
+    # BRENT_REF = Brent del ultimo quarter conocido del Consolidado (punto actual).
+    ruta_m2 = STAGING / "correlacion_brent.csv"
+    if not ruta_m2.exists():
+        raise FileNotFoundError(
+            "correlacion_brent.csv no existe: ejecutar 03b_correlacion_brent.py ANTES "
+            "de 03_modelo.py (orden del pipeline desde 2026-06-12).")
+    coef_m2 = pd.read_csv(ruta_m2).set_index("CAMPO")[["ALPHA", "BETA"]].to_dict("index")
+    df_q = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"])
+              & df["BRENT_FLAT_USD_BBL"].notna() & df["VIGENCIA"].notna()]
+    if df_q.empty:
+        raise ValueError("Sin quarters Consolidado en el tablon: no se puede fijar BRENT_REF.")
+    # VIGENCIA "YYYY_Qn" ordena lexicograficamente; el ultimo quarter es el punto actual
+    BRENT_REF = float(df_q.sort_values("VIGENCIA")["BRENT_FLAT_USD_BBL"].iloc[-1])
+    VIGENCIA_REF = str(df_q["VIGENCIA"].max())
+    p_ref_campo = {c: v["ALPHA"] + v["BETA"] * BRENT_REF for c, v in coef_m2.items()}
+    print(f"Re-anclaje: BRENT_REF={BRENT_REF:.2f} USD/bbl (quarter {VIGENCIA_REF}); "
+          f"p_ref por campo via Modelo 2.\n")
+
     registros = []
     campos = sorted(df["CAMPO"].unique())
     print(f"Campos: {len(campos)}\n")
@@ -503,6 +540,17 @@ if __name__ == "__main__":
         joblib.dump(iso_m,   MODELOS_DIR / f"{slug}_iso.joblib")
         joblib.dump(suave_m, MODELOS_DIR / f"{slug}_suave.joblib")
 
+        # ── Re-anclaje: delta_ref = f(p_ref) por motor ────────────────────────
+        p_ref = p_ref_campo.get(campo)
+        if p_ref is None:
+            print(f"  [WARN] {campo} sin coeficientes M2: re-anclaje con delta_ref=0")
+            delta_ref_iso = delta_ref_su = 0.0
+        else:
+            delta_ref_iso = float(iso_m.predict([p_ref])[0])
+            delta_ref_su  = float(suave_m.predict([p_ref])[0])
+            print(f"  Re-anclaje: p_ref={p_ref:.2f}  delta_ref ISO={delta_ref_iso:.2f}  "
+                  f"SUAVE={delta_ref_su:.2f}")
+
         # ── Sanity checks ─────────────────────────────────────────────────────
         bk_fin, bk_pdp, vbk_campo = _anclas_campo(df_campo)
         baseline_pdp = float(baselines_pdp.get(campo, 0.0) or 0.0)
@@ -522,10 +570,26 @@ if __name__ == "__main__":
                          vol_max_delta, baseline_latest, baseline_pdp,
                          df_sint=df_sint_campo, pneto_reales=pneto_reales)
 
+        # C5/C6 — invariantes del re-anclaje (sobre la reconstruccion anclada)
+        if p_ref is not None and pd.notna(baseline_latest):
+            _bk = bk_pdp if bk_fin is not None else None
+            v_ref = float(volumen_anclado(iso_m, [p_ref], baseline_latest,
+                                          delta_ref_iso, _bk)[0])
+            c5 = abs(v_ref - max(baseline_latest, 0)) < 1e-6 or \
+                 (_bk is not None and p_ref < _bk)
+            print(f"  C5 Vol(p_ref)=baseline: {'PASS' if c5 else 'FAIL'} "
+                  f"(vol={v_ref:.2f} vs baseline={baseline_latest:.2f})")
+            if _bk is not None:
+                v0 = float(volumen_anclado(iso_m, [_bk - 5.0], baseline_latest,
+                                           delta_ref_iso, _bk)[0])
+                print(f"  C6 Vol(bk_pdp-5)=0: {'PASS' if v0 == 0.0 else 'FAIL'} "
+                      f"(vol={v0:.2f})")
+
         # ── Plot ──────────────────────────────────────────────────────────────
         print()
         generar_plot(campo, df_campo, iso_m, suave_m, medianas, baseline_latest,
-                     baseline_pdp)
+                     baseline_pdp, p_ref=p_ref,
+                     delta_ref_iso=delta_ref_iso, delta_ref_su=delta_ref_su)
 
         # ── Predicciones en el tablon (en Precio Neto) ────────────────────────
         mask_c = df["CAMPO"] == campo
@@ -534,10 +598,11 @@ if __name__ == "__main__":
 
         if mask_feat.any():
             x_in = df_pred.loc[mask_feat, FEATURE].values
-            df.loc[mask_c & mask_feat, "PRED_ISOTONICA_MBPE"] = np.maximum(
-                baseline_latest + iso_m.predict(x_in), 0)
-            df.loc[mask_c & mask_feat, "PRED_SUAVE_MBPE"] = np.maximum(
-                baseline_latest + suave_m.predict(x_in), 0)
+            _bk_rec = bk_pdp if bk_fin is not None else None
+            df.loc[mask_c & mask_feat, "PRED_ISOTONICA_MBPE"] = volumen_anclado(
+                iso_m, x_in, baseline_latest, delta_ref_iso, _bk_rec)
+            df.loc[mask_c & mask_feat, "PRED_SUAVE_MBPE"] = volumen_anclado(
+                suave_m, x_in, baseline_latest, delta_ref_su, _bk_rec)
 
         mask_vol = mask_c & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()
         df.loc[mask_vol, "DELTA_ISOTONICA_VS_OFICIAL"] = (
@@ -557,6 +622,13 @@ if __name__ == "__main__":
             "W_SINTETICO":           round(w_bajo, 4) if pd.notna(w_bajo) else None,
             "W_SINTETICO_ESCALERA":  round(w_esc, 4) if pd.notna(w_esc) else None,
             "BASELINE_LATEST":    round(baseline_latest, 2),
+            # Re-anclaje (2026-06-12): punto actual donde Vol=baseline por construccion
+            "BRENT_REF_USD_BBL":  round(BRENT_REF, 2),
+            # 4 decimales: con 2, el shift del re-anclaje deja residuos de 0.01 MBPE
+            # visibles en la verificacion Vol(BRENT_REF)=baseline del export
+            "P_REF_USD_BBL":      round(p_ref, 4) if p_ref is not None else None,
+            "DELTA_REF_ISO":      round(delta_ref_iso, 4),
+            "DELTA_REF_SUAVE":    round(delta_ref_su, 4),
             # Motor PRIMARIO: Isotonica
             "R2_LOO_ISO":         round(r2i,  4) if pd.notna(r2i)  else None,
             "MAE_LOO_ISO":        round(maei, 2) if pd.notna(maei) else None,

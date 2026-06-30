@@ -128,11 +128,11 @@ def leer_hist1p_reservas() -> pd.DataFrame:
         "PROD": "PRODUCCION_MBPE",
     })
 
-    # Dedupe CAMPO×AÑO post-homologacion: los renombres historicos (CAÑO SURESTE→
-    # CAÑO SUR ESTE, CHICHIMENE K - T→CHICHIMENE, etc.) pueden dejar dos filas del
-    # mismo año — una con volumen y otra vacia (el año en que la fuente cambio de
-    # nombre) — y HIST trae duplicados exactos (CHICHIMENE 2018). Se prefiere la
-    # fila con 1P informado; duplicados con volumen distinto se reportan.
+    # Merge CAMPO×AÑO post-homologacion (UNIFICADO, 2026-06-12): las variantes
+    # renombradas (LLANITO/LLANITO UNIFICADO, QUIFA SUROESTE/QUIFA) son la MISMA
+    # entidad — una fila puede traer el volumen y la otra estar vacia el año del
+    # cambio de nombre. Se combina columna a columna con el primer valor no-nulo
+    # (NUNCA se suma); en conflicto de valores gana el mayor 1P y se reporta.
     n0 = len(df)
     conflicto = (df.dropna(subset=["VOLUMEN_1P_OFICIAL_MBPE"])
                    .groupby(["CAMPO", "AÑO"])["VOLUMEN_1P_OFICIAL_MBPE"]
@@ -142,9 +142,9 @@ def leer_hist1p_reservas() -> pd.DataFrame:
               f"distintos duplicados — se conserva el mayor: "
               f"{list(conflicto[conflicto].index[:5])}")
     df = (df.sort_values("VOLUMEN_1P_OFICIAL_MBPE", ascending=False, na_position="last")
-            .drop_duplicates(subset=["CAMPO", "AÑO"], keep="first"))
+            .groupby(["CAMPO", "AÑO"], as_index=False).first())
     if n0 - len(df) > 0:
-        print(f"      [INFO] {n0 - len(df)} filas CAMPO×AÑO duplicadas eliminadas "
+        print(f"      [INFO] {n0 - len(df)} filas CAMPO×AÑO combinadas "
               f"(renombres historicos / duplicados de fuente)")
     return df
 
@@ -213,10 +213,11 @@ def leer_hist1p_precio(df_brent_of: pd.DataFrame) -> pd.DataFrame:
     df = df[["CAMPO", "AÑO", "BRENT_FLAT_USD_BBL",
              "DESCUENTO_CALIDAD_USD_BBL", "DESCUENTO_TRANSPORTE_USD_BBL",
              "PRECIO_NETO_USD_BBL", "ALERTA_PRECIO"]].copy()
-    # Dedupe CAMPO×AÑO post-homologacion (renombres historicos): preferir fila
-    # con Precio Neto informado.
+    # Merge CAMPO×AÑO post-homologacion (UNIFICADO, 2026-06-12): combinar columna
+    # a columna con el primer valor no-nulo (una variante renombrada puede traer
+    # el neto y la otra los descuentos del mismo año). NUNCA sumar.
     df = (df.sort_values("PRECIO_NETO_USD_BBL", na_position="last")
-            .drop_duplicates(subset=["CAMPO", "AÑO"], keep="first"))
+            .groupby(["CAMPO", "AÑO"], as_index=False).first())
     return df
 
 
@@ -312,10 +313,12 @@ def leer_consolidado() -> pd.DataFrame:
     if out.empty:
         return out
 
-    # Dedupe: conservar curva con mayor volumen por CAMPO×ESCENARIO
+    # Merge CAMPO×ESCENARIO (UNIFICADO, 2026-06-12): variantes renombradas pueden
+    # traer curvas complementarias (una con reservas, otra con precio). Se combina
+    # con el primer valor no-nulo priorizando la curva con mayor volumen. NUNCA sumar.
     out["_orden"] = out["VOLUMEN_1P_SENSIBILIDAD_MBPE"].fillna(-1)
     out = (out.sort_values("_orden", ascending=False)
-              .drop_duplicates(["CAMPO", "ESCENARIO"], keep="first")
+              .groupby(["CAMPO", "ESCENARIO"], as_index=False).first()
               .drop(columns=["_orden"])
               .reset_index(drop=True))
 
@@ -431,9 +434,13 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
     Columnas de salida:
       BREAKEVEN_FINANCIERO_USD_BBL  — ponderado por vol 1P (todas las clases), trazabilidad.
       BREAKEVEN_OPERACIONAL_USD_BBL — ponderado por vol PDP, trazabilidad.
-      BK_ANCLA_FIN_USD_BBL  — piso SUPERIOR del anclaje (financiero PNP+PND ponderado).
+      BK_ANCLA_FIN_USD_BBL  — piso SUPERIOR del anclaje. Criterio CLASE DE MAYOR
+                               INCERTIDUMBRE (2026-06-11): BK financiero de la clase mas
+                               riesgosa presente con volumen y solver valido (PND>PNP>PDP).
                                Sobre este precio, delta=0 (full reservas); abajo arranca
                                la escalera.
+      BK_ANCLA_CLASE        — clase que fijo BK_ANCLA_FIN (D-PND/D-PNP/D-PDP) o
+                               FALLBACK_GLOBAL si ninguna tenia volumen+solver.
       BK_ANCLA_PDP_USD_BBL  — piso INFERIOR de abandono (operacional D-PDP).
                                Bajo este precio, NINGUNA reserva 1P es económica.
       BRENT_INSENSITIVE      — True si TODAS las clases del campo son Brent-insensibles
@@ -474,10 +481,11 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
             continue
         vol_c = df_ult[df_ult["CAMPO"] == campo]
 
-        # Acumuladores para el ponderado global (trazabilidad)
+        # Acumuladores para el ponderado global (trazabilidad / BK_REFERENCIA)
         sum_v = sum_fin = sum_op = 0.0
-        # Acumuladores para BK_ANCLA_FIN (financiero solo PNP+PND)
-        sum_v_pnd = sum_fin_pnd = 0.0
+        # BK financiero y volumen POR CLASE (para el criterio de mayor incertidumbre)
+        bk_fin_por_clase = {}
+        vol_por_clase = {}
         # PDP operacional para BK_ANCLA_PDP
         bk_ancla_pdp = np.nan
         # Salidas POR CLASE para la escalera multi-clase (Path D, 2026-06-11):
@@ -507,12 +515,16 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
                         if not fila_bk["SOLVER_S1_FALLO"].values[0] else np.nan)
             bk_op_c  = float(fila_bk["BREAKEVEN_OPERACIONAL_USD_BBL"].values[0])
 
-            # Ponderado global (trazabilidad)
+            # Ponderado global (trazabilidad / BK_REFERENCIA en PBI)
             if not np.isnan(bk_fin_c) and v > 0:
                 sum_v   += v
                 sum_fin += bk_fin_c * v
                 if not np.isnan(bk_op_c):
                     sum_op += bk_op_c * v
+
+            # BK financiero y volumen por clase (insumo del criterio de incertidumbre)
+            bk_fin_por_clase[clase] = bk_fin_c
+            vol_por_clase[clase]    = v
 
             # BK_ANCLA_PDP: operacional D-PDP (piso de abandono; fallback al financiero
             # si el NPV=0 no esta disponible)
@@ -521,11 +533,6 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
                     bk_ancla_pdp = bk_op_c
                 elif not np.isnan(bk_fin_c):
                     bk_ancla_pdp = bk_fin_c
-
-            # BK_ANCLA_FIN: financiero (piso superior, delta=0) ponderado de PNP y PND
-            if clase in ("D-PNP", "D-PND") and not np.isnan(bk_fin_c) and v > 0:
-                sum_v_pnd   += v
-                sum_fin_pnd += bk_fin_c * v
 
             # Salida por clase (Path D): limite economico propio, sin ponderar
             if clase in salidas_clase and not np.isnan(bk_fin_c):
@@ -550,12 +557,26 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
                       f"-> {bk_fin_pond:.2f}  [BREAKEVEN_FALLBACK - NO usar en soporte CAPEX]")
                 alerta_bk = "BREAKEVEN_FALLBACK"
 
-        # BK_ANCLA_FIN: financiero ponderado PNP+PND (o fallback al global si no hay PNP/PND)
-        if sum_v_pnd > 0:
-            bk_ancla_fin = sum_fin_pnd / sum_v_pnd
-        else:
-            # Solo hay PDP (sin PNP/PND con volumen) → usar el financiero global como piso
-            bk_ancla_fin = bk_fin_pond
+        # BK_ANCLA_FIN: criterio de CLASE DE MAYOR INCERTIDUMBRE (2026-06-11, supersede
+        # ponderado PNP+PND). La reserva mas riesgosa presente con volumen y solver valido
+        # (orden PND > PNP > PDP) fija el piso superior: es la primera que el auditor
+        # desincorpora al bajar el precio. Mas robusto que el ponderado por volumen (que se
+        # contamina con clases de breakeven extremo/degenerado, ej. anclas >120 USD/bbl) y
+        # mas conservador en el gate dorado. Ver 06_comparativa_bk.py y MAESTRO §10.
+        bk_ancla_fin = np.nan
+        bk_ancla_clase = None
+        for clase_inc in ("D-PND", "D-PNP", "D-PDP"):
+            v_inc = vol_por_clase.get(clase_inc, 0.0)
+            bk_inc = bk_fin_por_clase.get(clase_inc, np.nan)
+            if v_inc > 0 and not np.isnan(bk_inc):
+                bk_ancla_fin   = bk_inc
+                bk_ancla_clase = clase_inc
+                break
+        if np.isnan(bk_ancla_fin):
+            # Ninguna clase con volumen+solver valido → financiero global (mismo
+            # comportamiento que el fallback previo; ej. CASTILLA ESTE solo D-PDP sin vol)
+            bk_ancla_fin   = bk_fin_pond
+            bk_ancla_clase = "FALLBACK_GLOBAL"
 
         # Guard: la convención finanzas exige FIN (superior) > PDP (inferior). Si el
         # motor no separa ambos pisos para este campo (escalera degenerada), colapsar
@@ -572,6 +593,7 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
             "BREAKEVEN_OPERACIONAL_USD_BBL":  bk_op_pond,
             "BK_ANCLA_FIN_USD_BBL":           bk_ancla_fin,
             "BK_ANCLA_PDP_USD_BBL":           bk_ancla_pdp,
+            "BK_ANCLA_CLASE":                 bk_ancla_clase,
             "BK_SALIDA_PNP_USD_BBL":          salidas_clase["D-PNP"],
             "BK_SALIDA_PND_USD_BBL":          salidas_clase["D-PND"],
             "BRENT_INSENSITIVE":              brent_insens,
@@ -662,7 +684,7 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
     tablon = tablon.merge(
         df_bk_pond[["CAMPO", "VIGENCIA_BREAKEVEN",
                     "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
-                    "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL",
+                    "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL", "BK_ANCLA_CLASE",
                     "BK_SALIDA_PNP_USD_BBL", "BK_SALIDA_PND_USD_BBL",
                     "BRENT_INSENSITIVE", "ALERTA_BK"]].rename(
                         columns={"VIGENCIA_BREAKEVEN": "_VIG_BK"}),
@@ -712,7 +734,7 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
         "VOLUMEN_1P_OFICIAL_MBPE", "BASELINE_1P_VIGENCIA_MBPE",
         "VOLUMEN_1P_SENSIBILIDAD_MBPE", "DELTA_SENS_MBPE",
         "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
-        "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL",
+        "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL", "BK_ANCLA_CLASE",
         "BK_SALIDA_PNP_USD_BBL", "BK_SALIDA_PND_USD_BBL",
         "BRENT_INSENSITIVE",
         "VIGENCIA_BREAKEVEN",

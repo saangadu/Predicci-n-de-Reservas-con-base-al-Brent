@@ -1,8 +1,10 @@
 """
-test_04_pbi_export.py — Gate Fase 4: verifica el CSV de exportacion para Power BI
+test_04_pbi_export.py — Gate Fase 4: verifica los CSV de exportacion para Power BI
 
 Pruebas: ES_VIABLE correcto (marco neto), ES_EXTRAPOLADO presente, monotonia,
-reconstruccion baseline+delta, 0 NaN en export.
+re-anclaje Vol(BRENT_REF)=baseline, piso duro sub-abandono, tag M2_ES_FALLBACK,
+3 matrices (M1 puro / M2 puro / cadena completa), 0 NaN en export.
+Escenarios BAJO/ALTO retirados 2026-06-12.
 """
 import sys
 from pathlib import Path
@@ -37,11 +39,25 @@ def test_csv_existe():
     assert (RESULTADOS / "output_matriz_prediccion.csv").exists()
 
 
+def test_tres_matrices_existen():
+    """Directriz 2026-06-12: matrices aisladas por modelo para ubicar el origen de errores."""
+    assert (RESULTADOS / "output_matriz_modelo1.csv").exists(), "Falta matriz M1 pura"
+    assert (RESULTADOS / "output_matriz_modelo2.csv").exists(), "Falta matriz M2 pura"
+    m1 = pd.read_csv(RESULTADOS / "output_matriz_modelo1.csv", nrows=5)
+    m2 = pd.read_csv(RESULTADOS / "output_matriz_modelo2.csv", nrows=5)
+    for c in ["CAMPO", "MOTOR", "PRECIO_ACEITE_USD_BBL", "DELTA_ANCLADO_MBPE",
+              "VOLUMEN_1P_PREDICHO_MBPE", "P_REF_USD_BBL"]:
+        assert c in m1.columns, f"Falta {c} en output_matriz_modelo1.csv"
+    for c in ["CAMPO", "BRENT_USD_BBL", "PRECIO_ACEITE_USD_BBL", "M2_METODO",
+              "M2_ES_FALLBACK", "R2", "R2_LOO"]:
+        assert c in m2.columns, f"Falta {c} en output_matriz_modelo2.csv"
+
+
 def test_columnas_obligatorias(df_export):
-    cols = ["CAMPO", "MOTOR", "ESCENARIO_DESCUENTO", "BRENT_USD_BBL",
-            "PRECIO_NETO_EFECTIVO_USD_BBL", "DESCUENTO_IMPLICITO_USD_BBL",
-            "DELTA_PRED_MBPE",
+    cols = ["CAMPO", "MOTOR", "BRENT_USD_BBL",
+            "PRECIO_NETO_EFECTIVO_USD_BBL", "DELTA_PRED_MBPE",
             "VOLUMEN_1P_BASELINE_MBPE", "VOLUMEN_1P_PREDICHO_MBPE",
+            "BRENT_REF_USD_BBL", "P_REF_USD_BBL", "M2_METODO", "M2_ES_FALLBACK",
             "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
             "ES_VIABLE", "ES_FULL_RESERVAS", "ES_EXTRAPOLADO",
             "NIVEL_CONFIANZA"]
@@ -49,25 +65,16 @@ def test_columnas_obligatorias(df_export):
         assert c in df_export.columns, f"Columna {c} faltante en export"
 
 
-def test_descuento_implicito_coherente(df_export):
-    """DESCUENTO_IMPLICITO = Brent - Precio Neto efectivo (Modelo 2 no separa cal/tra)."""
-    esperado = df_export["BRENT_USD_BBL"] - df_export["PRECIO_NETO_EFECTIVO_USD_BBL"]
-    diff = (esperado - df_export["DESCUENTO_IMPLICITO_USD_BBL"]).abs()
-    assert (diff < 0.05).all(), "DESCUENTO_IMPLICITO no coincide con Brent - Neto"
+def test_sin_columnas_de_escenarios(df_export):
+    """Escenarios BAJO/ALTO y descuento implicito retirados del flujo (2026-06-12)."""
+    for c in ["ESCENARIO_DESCUENTO", "DESCUENTO_IMPLICITO_USD_BBL"]:
+        assert c not in df_export.columns, f"Columna de escenarios '{c}' aun presente"
 
 
 def test_sin_columnas_opp1(df_export):
     """Opp-1 (correccion de bias post-hoc) fue retirado: estas columnas no deben existir."""
     for c in ["VOLUMEN_1P_CORREGIDO_MBPE", "BIAS_CORRECCION_MBPE"]:
         assert c not in df_export.columns, f"Columna Opp-1 '{c}' aun presente en export"
-
-
-def test_escenario_descuento_valores(df_export):
-    """ESCENARIO_DESCUENTO debe tener exactamente BAJO/BASE/ALTO, en proporciones iguales."""
-    valores = set(df_export["ESCENARIO_DESCUENTO"].unique())
-    assert valores == {"BAJO", "BASE", "ALTO"}, f"Valores inesperados: {valores}"
-    conteo = df_export["ESCENARIO_DESCUENTO"].value_counts()
-    assert conteo.nunique() == 1, f"Filas desbalanceadas entre escenarios: {conteo.to_dict()}"
 
 
 def test_sin_nan_en_vol_predicho(df_export):
@@ -88,6 +95,49 @@ def test_vol_predicho_no_negativo(df_export):
     """Volumenes predichos deben ser >= 0 (reservas no pueden ser negativas)."""
     neg = (df_export["VOLUMEN_1P_PREDICHO_MBPE"] < 0).sum()
     assert neg == 0, f"{neg} filas con VOLUMEN_1P_PREDICHO < 0"
+
+
+def test_anclaje_vol_pref_igual_baseline(df_export):
+    """
+    Re-anclaje (2026-06-12): en la fila Brent=BRENT_REF (incluida EXACTA en la grilla),
+    Vol = baseline para todo campo con baseline — salvo campos cuyo p_ref cae bajo el
+    piso de abandono (alli la regla dura impone Vol=0).
+    """
+    brent_ref = df_export["BRENT_REF_USD_BBL"].dropna().iloc[0]
+    sub = df_export[(df_export["BRENT_USD_BBL"] == brent_ref)
+                    & df_export["VOLUMEN_1P_BASELINE_MBPE"].notna()]
+    assert not sub.empty, f"No existe la fila Brent={brent_ref} en el export"
+    piso = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] < \
+        sub["BREAKEVEN_OPERACIONAL_USD_BBL"].fillna(-np.inf)
+    dif = (sub["VOLUMEN_1P_PREDICHO_MBPE"] - sub["VOLUMEN_1P_BASELINE_MBPE"]).abs()
+    bad = sub[~piso & (dif > 0.02)]
+    assert bad.empty, (
+        f"{len(bad)} series no devuelven el baseline al precio actual "
+        f"(Brent={brent_ref}): {bad['CAMPO'].unique()[:5].tolist()}")
+
+
+def test_hard_zero_sub_abandono(df_export):
+    """Piso duro del re-anclaje: Precio Aceite < BK abandono -> Vol = 0 exacto."""
+    sub = df_export[df_export["BREAKEVEN_OPERACIONAL_USD_BBL"].notna()
+                    & df_export["VOLUMEN_1P_BASELINE_MBPE"].notna()]
+    bajo_piso = sub[sub["PRECIO_NETO_EFECTIVO_USD_BBL"]
+                    < sub["BREAKEVEN_OPERACIONAL_USD_BBL"]]
+    if bajo_piso.empty:
+        pytest.skip("Ninguna fila bajo el piso de abandono en la grilla")
+    no_cero = bajo_piso[bajo_piso["VOLUMEN_1P_PREDICHO_MBPE"] > 0]
+    assert no_cero.empty, (
+        f"{len(no_cero)} filas con vol>0 bajo el piso de abandono: "
+        f"{no_cero['CAMPO'].unique()[:5].tolist()}")
+
+
+def test_m2_fallback_visible(df_export):
+    """Tag visible del fallback M2: METODO y boolean coherentes en el export."""
+    fb = df_export[df_export["M2_ES_FALLBACK"]]
+    no_fb = df_export[~df_export["M2_ES_FALLBACK"]]
+    assert (fb["M2_METODO"] == "FALLBACK_BETA_PORTAFOLIO").all(), \
+        "M2_ES_FALLBACK=True con METODO distinto de FALLBACK_BETA_PORTAFOLIO"
+    assert (no_fb["M2_METODO"] != "FALLBACK_BETA_PORTAFOLIO").all(), \
+        "FALLBACK_BETA_PORTAFOLIO sin M2_ES_FALLBACK=True"
 
 
 def test_es_viable_usa_operacional(df_export):
@@ -123,33 +173,38 @@ def test_es_full_reservas_implica_es_viable(df_export):
 
 
 def test_es_extrapolado_existe(df_export):
-    """ES_EXTRAPOLADO debe existir y tener valores True (hay extrapolacion a $20/$120)."""
+    """ES_EXTRAPOLADO debe existir y tener valores True (hay extrapolacion en los extremos)."""
     assert "ES_EXTRAPOLADO" in df_export.columns
     n_extrap = df_export["ES_EXTRAPOLADO"].sum()
-    assert n_extrap > 0, "ES_EXTRAPOLADO=True en 0 filas (deberia haber extrapolacion en $20/$120)"
+    assert n_extrap > 0, "ES_EXTRAPOLADO=True en 0 filas (deberia haber extrapolacion)"
 
 
 def test_monotonia_export_por_campo_motor(df_export):
     """
-    Vol predicho debe ser monotonico no-decreciente por Brent para cada CAMPO×MOTOR×ESCENARIO.
-    (Los modelos tienen monotone_constraints y out_of_bounds='clip'.)
+    Vol predicho debe ser monotonico no-decreciente por Brent para cada CAMPO×MOTOR.
+    (Modelos monotonos + recta M2 con β>0 + shift constante del re-anclaje + piso duro
+    en el extremo bajo preservan la monotonia.)
     """
-    for (campo, motor, esc), sub in df_export.groupby(["CAMPO", "MOTOR", "ESCENARIO_DESCUENTO"]):
+    for (campo, motor), sub in df_export.groupby(["CAMPO", "MOTOR"]):
         sub_ord = sub.sort_values("BRENT_USD_BBL")
         vols    = sub_ord["VOLUMEN_1P_PREDICHO_MBPE"].values
         decreasing = np.sum(np.diff(vols) < -0.5)  # tolerancia 0.5 MBPE por redondeo
         assert decreasing == 0, \
-            f"{campo}/{motor}/{esc}: {decreasing} tramos decrecientes en el export"
+            f"{campo}/{motor}: {decreasing} tramos decrecientes en el export"
 
 
 def test_reconstruccion_baseline_delta(df_export):
     """
-    Vol predicho = max(0, baseline + delta). Verificar para un subconjunto.
+    Vol predicho = max(0, baseline + delta_anclado), con piso duro vol=0 bajo el
+    BK de abandono (alli baseline+delta puede ser >0 pero la regla fisica manda).
     """
     sub = df_export[df_export["VOLUMEN_1P_BASELINE_MBPE"].notna()].copy()
     if sub.empty:
         pytest.skip("No hay filas con BASELINE en export")
     reconstruido = np.maximum(sub["VOLUMEN_1P_BASELINE_MBPE"] + sub["DELTA_PRED_MBPE"], 0)
+    piso = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] < \
+        sub["BREAKEVEN_OPERACIONAL_USD_BBL"].fillna(-np.inf)
+    reconstruido = np.where(piso, 0.0, reconstruido)
     diff = (reconstruido - sub["VOLUMEN_1P_PREDICHO_MBPE"]).abs()
     assert (diff < 0.1).all(), \
         f"Reconstruccion baseline+delta no coincide en {(diff >= 0.1).sum()} filas"
@@ -158,7 +213,7 @@ def test_reconstruccion_baseline_delta(df_export):
 def test_brent_max_vol_positivo(df_export):
     """
     En el extremo superior de la grilla de Brent, campos con datos reales de sensibilidad
-    (N_REAL_DELTA > 0 en metricas.csv) y ES_VIABLE=True (escenario BASE) deben predecir vol > 0.
+    (N_REAL_DELTA > 0 en metricas.csv) y ES_VIABLE=True deben predecir vol > 0.
     Campos entrenados solo con sintéticos predicen correctamente vol=0 fuera
     de su rango de entrenamiento — no se validan aquí.
     """
@@ -170,9 +225,8 @@ def test_brent_max_vol_positivo(df_export):
     # Campos con al menos 1 punto real de sensibilidad
     campos_con_real = set(metricas.loc[metricas["N_REAL_DELTA"].fillna(0) > 0, "CAMPO"])
 
-    base = df_export[df_export["ESCENARIO_DESCUENTO"] == "BASE"]
-    brent_hi = base["BRENT_USD_BBL"].max()
-    sub_hi = base[base["BRENT_USD_BBL"] == brent_hi].copy()
+    brent_hi = df_export["BRENT_USD_BBL"].max()
+    sub_hi = df_export[df_export["BRENT_USD_BBL"] == brent_hi].copy()
 
     viables = sub_hi[
         sub_hi["CAMPO"].isin(campos_con_real) &
@@ -270,30 +324,16 @@ def test_changelog_predicciones_existe():
     assert ruta.exists(), "docs/CHANGELOG_PREDICCIONES.md no existe"
 
 
-def test_escenarios_monotonos_alto_base_bajo(df_export):
+def test_export_sin_punto_y_coma(df_export):
     """
-    Escenarios del Modelo 2: ALTO >= BASE >= BAJO en VOLUMEN para cada CAMPO×MOTOR×Brent.
-    Por construccion neto_ALTO >= neto_BASE >= neto_BAJO y el Modelo 1 es monotono creciente.
-    Corrige la anomalia del diseño 3D (a mayor precio, menor volumen en escenarios ALTOS).
+    Ninguna celda del export puede contener ';'. Excel en locale es-CO interpreta
+    ';' como delimitador de columnas y, al abrir el CSV (separado por comas),
+    parte celdas como MOTIVO_CONFIANZA en columnas espurias y pierde datos
+    (ver MAESTRO §10, fix 2026-06-11: separador interno cambiado a '|').
     """
-    piv = df_export.pivot_table(
-        index=["CAMPO", "MOTOR", "BRENT_USD_BBL"],
-        columns="ESCENARIO_DESCUENTO", values="VOLUMEN_1P_PREDICHO_MBPE")
-    if not {"BAJO", "BASE", "ALTO"}.issubset(piv.columns):
-        pytest.skip("Faltan escenarios en el export")
-    viol = ((piv["ALTO"] < piv["BASE"] - 1e-6) |
-            (piv["BASE"] < piv["BAJO"] - 1e-6)).sum()
-    assert viol == 0, f"{viol} filas con ALTO<BASE o BASE<BAJO (anomalia de escenarios)"
-
-
-def test_neto_desde_brent_ordena_escenarios():
-    """neto_desde_brent: BAJO <= BASE <= ALTO por construccion (bandas centradas en P50)."""
-    import importlib
-    m2 = importlib.import_module("03b_correlacion_brent")
-    coef = {"ALPHA": 5.0, "BETA": 0.85,
-            "RESID_P10": -3.0, "RESID_P50": 1.0, "RESID_P90": 4.0}
-    brent = np.array([60.0, 75.0, 90.0])
-    bajo = m2.neto_desde_brent(coef, brent, "BAJO")
-    base = m2.neto_desde_brent(coef, brent, "BASE")
-    alto = m2.neto_desde_brent(coef, brent, "ALTO")
-    assert np.all(bajo <= base + 1e-9) and np.all(base <= alto + 1e-9)
+    for col in df_export.columns:
+        con_punto_coma = df_export[col].astype(str).str.contains(";", na=False)
+        n = int(con_punto_coma.sum())
+        assert n == 0, (
+            f"Columna '{col}': {n} celdas con ';' (rompe Excel es-CO). "
+            f"Ej: {df_export.loc[con_punto_coma, col].iloc[0]!r}")

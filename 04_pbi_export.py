@@ -1,25 +1,28 @@
 """
-04_pbi_export.py — Meshgrid de predicciones para Power BI (composicion Modelo 2 + Modelo 1)
+04_pbi_export.py — Matrices de prediccion para Power BI (Modelo 2 + Modelo 1 + cadena)
 
-Pre-calcula todas las combinaciones (Brent x Campo x Motor x Escenario) como CSV estatico.
+Pre-calcula las combinaciones (Brent x Campo x Motor) como CSV estatico.
 PBI consume el CSV con DAX + What-If slider de Brent.
 
-ARQUITECTURA DE 2 MODELOS (2026-06-11):
+ARQUITECTURA (2026-06-11; reformada 2026-06-12 — sin escenarios, con re-anclaje):
   Para cada Brent de la grilla:
-    1. Modelo 2 (03b_correlacion_brent.py): Brent -> PRECIO NETO por campo y escenario.
-       Escenarios BAJO/BASE/ALTO = recta Theil-Sen ± cuantiles de residuales. El descuento
-       implicito (Brent − Neto) VARIA con el Brent (ya no es un P10/P90 constante).
-    2. Modelo 1 (03_modelo.py): PRECIO NETO -> DELTA Reservas. Motores 1D:
+    1. Modelo 2 (03b_correlacion_brent.py): Brent -> PRECIO ACEITE por campo
+       (recta unica BASE; escenarios BAJO/ALTO retirados).
+    2. Modelo 1 (03_modelo.py): PRECIO ACEITE -> DELTA Reservas. Motores 1D:
        - Isotonica (PRIMARIO), Suave/PCHIP (VALIDACION). XGBoost retirado.
-    3. VOLUMEN = max(BASELINE_LATEST + DELTA, 0).
+    3. RE-ANCLAJE: VOLUMEN = max(BASELINE + [f(p) − f(p_ref)], 0), piso duro
+       p < BK_ANCLA_PDP -> 0. p_ref/delta_ref vienen de metricas.csv (03).
+       Garantia: en Brent=BRENT_REF (ultimo quarter conocido) Vol = baseline exacto.
 
-  ES_VIABLE        = precio_neto >= BREAKEVEN_OPERACIONAL (piso inferior/abandono).
-  ES_FULL_RESERVAS = precio_neto >= BREAKEVEN_FINANCIERO  (piso superior, sin castigo PNP+PND).
+  ES_VIABLE        = precio_aceite >= BREAKEVEN_OPERACIONAL (piso inferior/abandono).
+  ES_FULL_RESERVAS = precio_aceite >= BREAKEVEN_FINANCIERO  (piso superior).
   ES_EXTRAPOLADO   = Brent fuera de la banda observada del Consolidado por campo ± margen.
+  M2_ES_FALLBACK   = el campo no tiene relacion Aceite~Brent propia (k de portafolio).
 
-  D6: BK_REFERENCIA_FIN/OPE = breakevens ponderados 1P globales (todas las clases), cifra
-  de REFERENCIA para tableros. Las anclas del modelo (PNP+PND / PDP) gobiernan
-  ES_VIABLE/ES_FULL_RESERVAS.
+TRES MATRICES (aislar el origen de errores, directriz 2026-06-12):
+  output_matriz_modelo1.csv   grilla Precio Aceite -> delta anclado/volumen (M1 puro)
+  output_matriz_modelo2.csv   grilla Brent -> Precio Aceite + metricas (M2 puro)
+  output_matriz_prediccion.csv  cadena completa Brent -> Aceite -> Volumen
 
 Confianza por campo: usa MAE_LOO del PRIMARIO (Isotonica) y la divergencia Isotonica↔Suave.
 """
@@ -32,6 +35,8 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
+
+from motores_modelo1 import volumen_anclado
 
 BASE_DIR    = Path(__file__).parent
 STAGING     = BASE_DIR / "datos" / "staging"
@@ -71,9 +76,11 @@ CONFIANZA_SKILL_MIN = 0.0
 
 HISTORICO_DIR = RESULTADOS / "historico_predicciones"
 
-ESCENARIOS = ["BAJO", "BASE", "ALTO"]
 # Motores 1D: PRIMARIO (Isotonica) y VALIDACION (Suave). Sufijo de archivo joblib y label.
 MOTORES = [("Isotonica", "iso"), ("Suave", "suave")]
+
+# Grilla de Precio Aceite para la matriz M1 pura (independiente del Brent)
+PNETO_GRID_MIN, PNETO_GRID_MAX, PNETO_GRID_PASO = 20.0, 110.0, 1.0
 
 
 def siguiente_quarter(q: str) -> str:
@@ -178,12 +185,14 @@ def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
         partes.append(f"skill={skill:.2f}")
     if outlier_lloo:
         partes.append("OUTLIER_LOO" if outlier_material else "OUTLIER_LOO_INMATERIAL")
-    motivo = "; ".join(partes)
+    # Separador " | " (no ";"): Excel es-CO interpreta ";" como delimitador de
+    # columnas y parte la celda MOTIVO_CONFIANZA al abrir el CSV (ver MAESTRO §10).
+    motivo = " | ".join(partes)
 
     if n_real == 0:
-        return "SOLO_SINTETICO", f"sin datos reales; {motivo}"
+        return "SOLO_SINTETICO", f"sin datos reales | {motivo}"
     if baseline < CONFIANZA_BASELINE_MIN:
-        return "BAJA", f"micro-campo; {motivo}"
+        return "BAJA", f"micro-campo | {motivo}"
     if outlier_material:
         if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
             return "MEDIA", motivo
@@ -199,16 +208,15 @@ def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
         return "ALTA", motivo
     if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
         if sin_skill:
-            return "MEDIA", f"sin skill vs ingenuo; {motivo}"
+            return "MEDIA", f"sin skill vs ingenuo | {motivo}"
         return "MEDIA", motivo
     return "BAJA", motivo
 
 
 def calcular_divergencia_motores(df_out: pd.DataFrame) -> pd.Series:
-    """Divergencia media |Suave - Isotonica| / Isotonica por campo en banda Brent $40-$80,
-    escenario BASE. Retorna Serie indexada por CAMPO."""
-    banda = df_out[(df_out["BRENT_USD_BBL"] >= 40) & (df_out["BRENT_USD_BBL"] <= 80) &
-                   (df_out["ESCENARIO_DESCUENTO"] == "BASE")]
+    """Divergencia media |Suave - Isotonica| / Isotonica por campo en banda Brent $40-$80.
+    Retorna Serie indexada por CAMPO."""
+    banda = df_out[(df_out["BRENT_USD_BBL"] >= 40) & (df_out["BRENT_USD_BBL"] <= 80)]
     piv = (banda.pivot_table(index=["CAMPO", "BRENT_USD_BBL"], columns="MOTOR",
                              values="VOLUMEN_1P_PREDICHO_MBPE")
            .reset_index().dropna())
@@ -305,6 +313,17 @@ if __name__ == "__main__":
     baselines   = cargar_baselines(df)
     bandas      = banda_historica_brent(df)
 
+    # Re-anclaje (2026-06-12): p_ref/delta_ref por campo x motor desde metricas.csv (03)
+    ruta_met = STAGING / "metricas.csv"
+    if not ruta_met.exists():
+        raise FileNotFoundError("metricas.csv no existe: correr 03_modelo.py primero.")
+    _met_full = pd.read_csv(ruta_met)
+    anclaje = _met_full.set_index("CAMPO")[
+        ["BRENT_REF_USD_BBL", "P_REF_USD_BBL", "DELTA_REF_ISO", "DELTA_REF_SUAVE"]
+    ].to_dict("index")
+    BRENT_REF = float(_met_full["BRENT_REF_USD_BBL"].dropna().iloc[0]) \
+        if _met_full["BRENT_REF_USD_BBL"].notna().any() else np.nan
+
     vigencia_base, q_objetivo = derivar_vigencias(df)
     fecha_prediccion = str(date.today())
     print(f"\n{'='*55}")
@@ -321,16 +340,25 @@ if __name__ == "__main__":
         brent_obs_min, brent_obs_max = 58.0, 92.0
     brent_min_din = int(np.floor(brent_obs_min)) - MARGEN_BRENT_USD
     brent_max_din = int(np.ceil(brent_obs_max)) + MARGEN_BRENT_USD
-    brent_range = np.arange(brent_min_din, brent_max_din + BRENT_PASO, BRENT_PASO)
+    brent_range = np.arange(brent_min_din, brent_max_din + BRENT_PASO, BRENT_PASO,
+                            dtype=float)
+    # Incluir el punto EXACTO de re-anclaje: la fila Brent=BRENT_REF debe existir
+    # en la matriz para que Vol=baseline sea verificable sin interpolar
+    if pd.notna(BRENT_REF):
+        brent_range = np.unique(np.append(brent_range, round(BRENT_REF, 2)))
     campos = sorted(df["CAMPO"].unique())
 
     print(f"Banda Consolidado observada: [${brent_obs_min:.1f}, ${brent_obs_max:.1f}]")
     print(f"Grilla Brent (+-{MARGEN_BRENT_USD}): [${brent_min_din}, ${brent_max_din}] "
           f"paso ${BRENT_PASO} = {len(brent_range)} pts")
     print(f"Campos: {len(campos)} | Motores: Isotonica (primario), Suave (validacion)")
-    print(f"Escenarios (Modelo 2): BAJO/BASE/ALTO = recta Theil-Sen +- residuales\n")
+    print(f"Re-anclaje: BRENT_REF={BRENT_REF:.2f} -> Vol(BRENT_REF) = baseline exacto\n")
 
-    filas = []
+    pneto_grid = np.arange(PNETO_GRID_MIN, PNETO_GRID_MAX + PNETO_GRID_PASO,
+                           PNETO_GRID_PASO)
+    filas    = []   # cadena completa Brent -> Aceite -> Volumen
+    filas_m1 = []   # Modelo 1 puro (grilla en Precio Aceite)
+    filas_m2 = []   # Modelo 2 puro (grilla en Brent)
     for campo in campos:
         modelos = {}
         for label, suf in MOTORES:
@@ -342,78 +370,124 @@ if __name__ == "__main__":
             continue
         coef = correlacion.get(campo)
         if coef is None:
-            print(f"  [WARN] {campo}: sin correlacion Brent->Neto, omitiendo")
+            print(f"  [WARN] {campo}: sin correlacion Brent->Aceite, omitiendo")
             continue
 
         bk_fin, bk_pdp = anclas.get(campo, (np.nan, np.nan))
         bk_ref_fin, bk_ref_ope = ponderados.get(campo, (np.nan, np.nan))
         baseline = baselines.get(campo, np.nan)
         bk_min_hist, bk_max_hist = bandas.get(campo, (40.0, 80.0))
+        anc = anclaje.get(campo, {})
+        p_ref = anc.get("P_REF_USD_BBL", np.nan)
+        delta_refs = {"Isotonica": anc.get("DELTA_REF_ISO", 0.0) or 0.0,
+                      "Suave":     anc.get("DELTA_REF_SUAVE", 0.0) or 0.0}
+        m2_metodo = coef.get("METODO", "")
+        m2_fallback = bool(coef.get("ES_FALLBACK", False))
+        _bk_dura = bk_pdp if pd.notna(bk_pdp) else None
 
-        for esc in ESCENARIOS:
-            # Modelo 2: Brent -> Precio Neto (por escenario)
-            precio_neto = m2.neto_desde_brent(coef, brent_range, esc)
+        # ── Matriz M2 pura: Brent -> Precio Aceite ────────────────────────────
+        aceite_grid = m2.neto_desde_brent(coef, brent_range)
+        for i, brent in enumerate(brent_range):
+            filas_m2.append({
+                "CAMPO":                  campo,
+                "BRENT_USD_BBL":          float(brent),
+                "PRECIO_ACEITE_USD_BBL":  round(float(aceite_grid[i]), 2),
+                "ALPHA":                  coef.get("ALPHA"),
+                "BETA":                   coef.get("BETA"),
+                "M2_METODO":              m2_metodo,
+                "M2_ES_FALLBACK":         m2_fallback,
+                "N_PUNTOS":               coef.get("N_PUNTOS"),
+                "R2":                     coef.get("R2"),
+                "R2_LOO":                 coef.get("R2_LOO"),
+                "MAE_LOO":                coef.get("MAE_LOO"),
+                "ALERTA":                 coef.get("ALERTA", ""),
+            })
 
-            for label, modelo in modelos.items():
-                # Modelo 1: Precio Neto -> Delta -> Volumen
-                delta = modelo.predict(precio_neto)
-                vol   = np.maximum(baseline + delta, 0) if pd.notna(baseline) else delta
+        # ── Matriz M1 pura: Precio Aceite -> Delta anclado / Volumen ─────────
+        for label, modelo in modelos.items():
+            d_ref = float(delta_refs[label])
+            delta_anc = modelo.predict(pneto_grid) - d_ref
+            vol_anc = volumen_anclado(modelo, pneto_grid, baseline, d_ref, _bk_dura) \
+                if pd.notna(baseline) else np.full(len(pneto_grid), np.nan)
+            for i, pn in enumerate(pneto_grid):
+                filas_m1.append({
+                    "CAMPO":                       campo,
+                    "MOTOR":                       label,
+                    "PRECIO_ACEITE_USD_BBL":       float(pn),
+                    "DELTA_ANCLADO_MBPE":          round(float(delta_anc[i]), 2),
+                    "VOLUMEN_1P_PREDICHO_MBPE":    round(float(vol_anc[i]), 2)
+                                                   if pd.notna(vol_anc[i]) else None,
+                    "VOLUMEN_1P_BASELINE_MBPE":    round(float(baseline), 2)
+                                                   if pd.notna(baseline) else None,
+                    "P_REF_USD_BBL":               round(float(p_ref), 2)
+                                                   if pd.notna(p_ref) else None,
+                    "BREAKEVEN_FINANCIERO_USD_BBL":  round(bk_fin, 2) if pd.notna(bk_fin) else None,
+                    "BREAKEVEN_OPERACIONAL_USD_BBL": round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
+                })
 
-                for i, brent in enumerate(brent_range):
-                    pn   = float(precio_neto[i])
-                    pn_r = round(pn, 2)
-                    es_viable = (pn_r >= round(bk_pdp, 2)) if pd.notna(bk_pdp) else True
-                    es_full   = (pn_r >= round(bk_fin, 2)) if pd.notna(bk_fin) else True
-                    es_extrap = (float(brent) < bk_min_hist - MARGEN_EXTRAP_USD or
-                                 float(brent) > bk_max_hist + MARGEN_EXTRAP_USD)
+        # ── Cadena completa: Brent -> Aceite -> Volumen anclado ──────────────
+        for label, modelo in modelos.items():
+            d_ref = float(delta_refs[label])
+            delta_anc = modelo.predict(aceite_grid) - d_ref
+            vol = volumen_anclado(modelo, aceite_grid, baseline, d_ref, _bk_dura) \
+                if pd.notna(baseline) else modelo.predict(aceite_grid) - d_ref
 
-                    vol_pred = float(vol[i])
-                    vol_base = float(baseline) if pd.notna(baseline) else np.nan
-                    delta_vs = round(vol_pred - vol_base, 2) if pd.notna(baseline) else np.nan
-                    pct_vs   = round((vol_pred - vol_base) / vol_base * 100, 2) \
-                        if pd.notna(baseline) and vol_base > 0 else np.nan
+            for i, brent in enumerate(brent_range):
+                pn   = float(aceite_grid[i])
+                pn_r = round(pn, 2)
+                es_viable = (pn_r >= round(bk_pdp, 2)) if pd.notna(bk_pdp) else True
+                es_full   = (pn_r >= round(bk_fin, 2)) if pd.notna(bk_fin) else True
+                es_extrap = (float(brent) < bk_min_hist - MARGEN_EXTRAP_USD or
+                             float(brent) > bk_max_hist + MARGEN_EXTRAP_USD)
 
-                    filas.append({
-                        "CAMPO":                          campo,
-                        "MOTOR":                          label,
-                        "ESCENARIO_DESCUENTO":            esc,
-                        "BRENT_USD_BBL":                  float(brent),
-                        "PRECIO_NETO_EFECTIVO_USD_BBL":   round(pn, 2),
-                        # Modelo 2 ya no separa calidad/transporte: descuento implicito total
-                        "DESCUENTO_IMPLICITO_USD_BBL":    round(float(brent) - pn, 2),
-                        "DELTA_PRED_MBPE":                round(float(delta[i]), 2),
-                        "VOLUMEN_1P_BASELINE_MBPE":        round(vol_base, 2) if pd.notna(vol_base) else None,
-                        "VOLUMEN_1P_PREDICHO_MBPE":        round(vol_pred, 2),
-                        "DELTA_VS_BASE_MBPE":              delta_vs,
-                        "DELTA_VS_BASE_PCT":               pct_vs,
-                        "BREAKEVEN_FINANCIERO_USD_BBL":    round(bk_fin, 2) if pd.notna(bk_fin) else None,
-                        "BREAKEVEN_OPERACIONAL_USD_BBL":   round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
-                        "BK_REFERENCIA_FIN_USD_BBL":       round(bk_ref_fin, 2) if pd.notna(bk_ref_fin) else None,
-                        "BK_REFERENCIA_OPE_USD_BBL":       round(bk_ref_ope, 2) if pd.notna(bk_ref_ope) else None,
-                        "ES_VIABLE":                       es_viable,
-                        "ES_FULL_RESERVAS":                es_full,
-                        "ES_EXTRAPOLADO":                  es_extrap,
-                        "TIPO_DATO":                       "PREDICCIÓN",
-                        "Q_OBJETIVO":                      q_objetivo,
-                        "VIGENCIA_BASE":                   vigencia_base,
-                        "FECHA_PREDICCION":                fecha_prediccion,
-                    })
+                vol_pred = float(vol[i])
+                vol_base = float(baseline) if pd.notna(baseline) else np.nan
+                delta_vs = round(vol_pred - vol_base, 2) if pd.notna(baseline) else np.nan
+                pct_vs   = round((vol_pred - vol_base) / vol_base * 100, 2) \
+                    if pd.notna(baseline) and vol_base > 0 else np.nan
 
-        # Resumen impreso (escenario BASE, motor primario)
+                filas.append({
+                    "CAMPO":                          campo,
+                    "MOTOR":                          label,
+                    "BRENT_USD_BBL":                  float(brent),
+                    "PRECIO_NETO_EFECTIVO_USD_BBL":   round(pn, 2),
+                    "DELTA_PRED_MBPE":                round(float(delta_anc[i]), 2),
+                    "VOLUMEN_1P_BASELINE_MBPE":        round(vol_base, 2) if pd.notna(vol_base) else None,
+                    "VOLUMEN_1P_PREDICHO_MBPE":        round(vol_pred, 2),
+                    "DELTA_VS_BASE_MBPE":              delta_vs,
+                    "DELTA_VS_BASE_PCT":               pct_vs,
+                    # Re-anclaje: punto actual donde Vol=baseline por construccion
+                    "BRENT_REF_USD_BBL":               round(BRENT_REF, 2) if pd.notna(BRENT_REF) else None,
+                    "P_REF_USD_BBL":                   round(float(p_ref), 2) if pd.notna(p_ref) else None,
+                    # Tag M2: campos sin relacion propia Aceite~Brent (k de portafolio)
+                    "M2_METODO":                       m2_metodo,
+                    "M2_ES_FALLBACK":                  m2_fallback,
+                    "BREAKEVEN_FINANCIERO_USD_BBL":    round(bk_fin, 2) if pd.notna(bk_fin) else None,
+                    "BREAKEVEN_OPERACIONAL_USD_BBL":   round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
+                    "BK_REFERENCIA_FIN_USD_BBL":       round(bk_ref_fin, 2) if pd.notna(bk_ref_fin) else None,
+                    "BK_REFERENCIA_OPE_USD_BBL":       round(bk_ref_ope, 2) if pd.notna(bk_ref_ope) else None,
+                    "ES_VIABLE":                       es_viable,
+                    "ES_FULL_RESERVAS":                es_full,
+                    "ES_EXTRAPOLADO":                  es_extrap,
+                    "TIPO_DATO":                       "PREDICCIÓN",
+                    "Q_OBJETIVO":                      q_objetivo,
+                    "VIGENCIA_BASE":                   vigencia_base,
+                    "FECHA_PREDICCION":                fecha_prediccion,
+                })
+
+        # Resumen impreso (motor primario, prediccion anclada)
         if "Isotonica" in modelos and pd.notna(baseline):
-            nb_lo = m2.neto_desde_brent(coef, np.array([brent_min_din]), "BASE")
-            nb_hi = m2.neto_desde_brent(coef, np.array([brent_max_din]), "BASE")
-            vol_lo = max(baseline + float(modelos["Isotonica"].predict(nb_lo)[0]), 0)
-            vol_hi = max(baseline + float(modelos["Isotonica"].predict(nb_hi)[0]), 0)
+            d_ref = float(delta_refs["Isotonica"])
+            nb = m2.neto_desde_brent(coef, np.array([brent_min_din, brent_max_din]))
+            v = volumen_anclado(modelos["Isotonica"], nb, baseline, d_ref, _bk_dura)
             print(f"  {campo:<20} | baseline={baseline:.1f} MBPE | "
-                  f"Iso@${brent_min_din}={vol_lo:.0f} -> @${brent_max_din}={vol_hi:.0f}")
+                  f"Iso@${brent_min_din}={v[0]:.0f} -> @${brent_max_din}={v[1]:.0f}")
 
     df_out = pd.DataFrame(filas)
 
     # ── Clasificacion de confianza por campo (primario = Isotonica) ───────────
-    ruta_met = STAGING / "metricas.csv"
-    if ruta_met.exists():
-        _met_raw = pd.read_csv(ruta_met)
+    if True:
+        _met_raw = _met_full.copy()
         for _c in ["ALERTA_LOO_OUTLIER_ISO"]:
             if _c not in _met_raw.columns:
                 _met_raw[_c] = False
@@ -467,11 +541,17 @@ if __name__ == "__main__":
                 print(f"    {r['CAMPO']:<25} baseline={r['BASELINE_LATEST']:.0f} MBPE  "
                       f"MAE_rel={r['MAE_REL_LOO']:.0%}  -> {r['NIVEL_CONFIANZA']}")
         print(f"{'='*55}\n")
-    else:
-        print("[WARN] metricas.csv no encontrado; NIVEL_CONFIANZA no calculado.")
 
     ruta_csv = RESULTADOS / "output_matriz_prediccion.csv"
     df_out.to_csv(ruta_csv, index=False, encoding="utf-8-sig")
+
+    # Matrices aisladas por modelo (directriz 2026-06-12)
+    ruta_m1 = RESULTADOS / "output_matriz_modelo1.csv"
+    ruta_m2_csv = RESULTADOS / "output_matriz_modelo2.csv"
+    pd.DataFrame(filas_m1).to_csv(ruta_m1, index=False, encoding="utf-8-sig")
+    pd.DataFrame(filas_m2).to_csv(ruta_m2_csv, index=False, encoding="utf-8-sig")
+    print(f"  Matriz Modelo 1 (Aceite->Volumen, puro): {ruta_m1}")
+    print(f"  Matriz Modelo 2 (Brent->Aceite, puro):   {ruta_m2_csv}")
 
     HISTORICO_DIR.mkdir(parents=True, exist_ok=True)
     nombre_snapshot = f"prediccion_{q_objetivo}_generada_{fecha_prediccion}.csv"
@@ -484,25 +564,33 @@ if __name__ == "__main__":
     print(f"  Extrapolados: {df_out['ES_EXTRAPOLADO'].sum()} "
           f"({df_out['ES_EXTRAPOLADO'].mean():.0%} del total)")
 
-    # Sanity final: extremos del grid (escenario BASE)
-    df_base = df_out[df_out["ESCENARIO_DESCUENTO"] == "BASE"]
+    # Sanity final: extremos del grid
     brent_lo = int(brent_range[0]); brent_hi = int(brent_range[-1])
-    check_lo = df_base[df_base["BRENT_USD_BBL"] == brent_lo].groupby(
+    check_lo = df_out[df_out["BRENT_USD_BBL"] == brent_lo].groupby(
         ["CAMPO", "MOTOR"])["VOLUMEN_1P_PREDICHO_MBPE"].mean()
-    check_hi = df_base[df_base["BRENT_USD_BBL"] == brent_hi].groupby(
+    check_hi = df_out[df_out["BRENT_USD_BBL"] == brent_hi].groupby(
         ["CAMPO", "MOTOR"])["VOLUMEN_1P_PREDICHO_MBPE"].mean()
-    print(f"\n  Sanity Brent=${brent_lo} (extremo bajo, BASE): {len(check_lo)} series")
-    print(f"  Sanity Brent=${brent_hi} (extremo alto, BASE): {len(check_hi)} series")
+    print(f"\n  Sanity Brent=${brent_lo} (extremo bajo): {len(check_lo)} series")
+    print(f"  Sanity Brent=${brent_hi} (extremo alto): {len(check_hi)} series")
 
-    # Verificacion de monotonia de escenarios: ALTO >= BASE >= BAJO en volumen
-    piv_esc = df_out.pivot_table(index=["CAMPO", "MOTOR", "BRENT_USD_BBL"],
-                                 columns="ESCENARIO_DESCUENTO",
-                                 values="VOLUMEN_1P_PREDICHO_MBPE")
-    if {"BAJO", "BASE", "ALTO"}.issubset(piv_esc.columns):
-        viol = ((piv_esc["ALTO"] < piv_esc["BASE"] - 1e-6) |
-                (piv_esc["BASE"] < piv_esc["BAJO"] - 1e-6)).sum()
-        print(f"\n  Monotonia escenarios (ALTO>=BASE>=BAJO): "
-              f"{len(piv_esc) - viol}/{len(piv_esc)} OK ({viol} violaciones)")
+    # Sanity re-anclaje: en Brent=BRENT_REF el volumen debe ser el baseline exacto
+    # (salvo p_ref < BK abandono: alli el piso duro manda y Vol=0)
+    if pd.notna(BRENT_REF):
+        ref = df_out.copy()
+        ref["_dist"] = (ref["BRENT_USD_BBL"] - BRENT_REF).abs()
+        idx = ref.groupby(["CAMPO", "MOTOR"])["_dist"].idxmin()
+        ref = ref.loc[idx]
+        ref = ref[ref["VOLUMEN_1P_BASELINE_MBPE"].notna()]
+        # tolerancia = |curva(p@brent_cercano) − curva(p_ref)| ≈ paso de grilla
+        dif = (ref["VOLUMEN_1P_PREDICHO_MBPE"] - ref["VOLUMEN_1P_BASELINE_MBPE"]).abs()
+        piso = ref["PRECIO_NETO_EFECTIVO_USD_BBL"] < ref["BREAKEVEN_OPERACIONAL_USD_BBL"].fillna(-np.inf)
+        ok = ((dif <= 1.0) | piso).sum()
+        print(f"\n  Sanity re-anclaje @Brent~{BRENT_REF:.1f}: {ok}/{len(ref)} series "
+              f"con Vol=baseline (tol grilla $1) o en piso de abandono")
+        if ok < len(ref):
+            peores = ref.loc[~((dif <= 1.0) | piso)].assign(_dif=dif)
+            print(peores.nlargest(5, "_dif")[["CAMPO", "MOTOR", "VOLUMEN_1P_PREDICHO_MBPE",
+                                              "VOLUMEN_1P_BASELINE_MBPE"]].to_string(index=False))
 
     brent_ref = round((brent_obs_min + brent_obs_max) / 2)
     comp = generar_comparacion_vs_anterior(df_out, q_objetivo, brent_ref, ruta_snapshot)

@@ -5,18 +5,23 @@ Problema: en Ecopetrol un mismo campo se nombra distinto entre bases de datos
 (HIST 1P, Consolidado, Breakeven, Sensibilidad). Sin homologar, los joins por
 string fallan silenciosamente y se pierden filas.
 
-Estrategia (decision usuario 2026-06-03):
+Estrategia (decision usuario 2026-06-03; clave final UNIFICADO desde 2026-06-12):
   1. AUTORIDAD: DIM_CAMPO.xlsx (tabla maestra del Tablero Historico, 900 campos).
-     Es el diccionario de nombres CAMPO validos a nivel granular.
-  2. ALIAS_OVERRIDE: mapeo manual de variantes que DIM_CAMPO no captura
+     Es el diccionario de nombres CAMPO validos a nivel granular. El usuario
+     mantiene el DIM: mapeos malos se corrigen en el Excel, no con overrides.
+  2. CLAVE FINAL = UNIFICADO: el match se hace contra CAMPO granular pero el
+     nombre devuelto es SIEMPRE su UNIFICADO. Variantes renombradas entre
+     vigencias (LLANITO/LLANITO UNIFICADO, QUIFA SUROESTE/QUIFA) consolidan
+     asi su historia bajo una sola clave.
+  3. ALIAS_OVERRIDE: mapeo manual de variantes que DIM_CAMPO no captura
      (sufijos de yacimiento, alias historicos, filiales). Editable por vigencia.
-  3. AUDITORIA: todo nombre que no homologa se marca NO_HOMOLOGADO (no se descarta
+  4. AUDITORIA: todo nombre que no homologa se marca NO_HOMOLOGADO (no se descarta
      en silencio) para revision.
 
 Uso:
     from homologacion import Homologador
     h = Homologador()                       # carga DIM_CAMPO una sola vez
-    campo, flag = h.homologar("LA REFORMA") # -> ("LIBERTAD", "OK") via override
+    campo, flag = h.homologar("QUIFA SUROESTE")  # -> ("QUIFA", "OK") via UNIFICADO
     attrs = h.atributos("CASTILLA")         # -> {UNIFICADO, VICEPRESIDENCIA, ACTIVO, ...}
 """
 
@@ -111,15 +116,29 @@ class Homologador:
         dim = pd.read_excel(ruta, sheet_name="DIM_CAMPO", engine="openpyxl")
         dim.columns = [str(c).strip() for c in dim.columns]
         dim["CAMPO_NORM"] = dim["CAMPO"].apply(normalizar_base)
+        dim["UNIFICADO_NORM"] = dim["UNIFICADO"].apply(normalizar_base)
         # Diccionario de nombres validos -> fila de atributos
         self._dim = dim.drop_duplicates("CAMPO_NORM").set_index("CAMPO_NORM")
         self._validos = set(self._dim.index)
+        # Indice secundario por UNIFICADO: atributos() debe responder tambien
+        # para nombres ya consolidados (downstream solo conoce el UNIFICADO)
+        self._uni = dim.drop_duplicates("UNIFICADO_NORM").set_index("UNIFICADO_NORM")
+
+    def _a_unificado(self, granular: str) -> str:
+        """Clave final = UNIFICADO del DIM (decision 2026-06-12). Si el granular
+        no esta en DIM o su UNIFICADO viene vacio, se conserva el granular."""
+        if granular in self._dim.index:
+            uni = self._dim.loc[granular, "UNIFICADO_NORM"]
+            if isinstance(uni, str) and uni:
+                return uni
+        return granular
 
     def homologar(self, nombre: str) -> tuple:
         """
         Retorna (campo_canonico, flag) donde flag ∈ {"OK", "NO_HOMOLOGADO"}.
         Orden: normaliza -> override directo -> valida en DIM -> strip sufijo
-        yacimiento -> valida -> NO_HOMOLOGADO.
+        yacimiento -> valida -> NO_HOMOLOGADO. Todo match OK se resuelve al
+        UNIFICADO del DIM (la clave final homologada es siempre UNIFICADO).
         """
         base = normalizar_base(nombre)
         if not base:
@@ -127,28 +146,32 @@ class Homologador:
 
         # 1. Override explicito
         if base in ALIAS_OVERRIDE:
-            return ALIAS_OVERRIDE[base], "OK"
+            return self._a_unificado(ALIAS_OVERRIDE[base]), "OK"
 
         # 2. Match directo contra la tabla maestra
         if base in self._validos:
-            return base, "OK"
+            return self._a_unificado(base), "OK"
 
         # 3. Quitar sufijo de yacimiento (K/T) e intentar de nuevo
         for suf in SUFIJOS_YACIMIENTO:
             if base.endswith(suf):
                 candidato = base[: -len(suf)].strip()
                 if candidato in ALIAS_OVERRIDE:
-                    return ALIAS_OVERRIDE[candidato], "OK"
+                    return self._a_unificado(ALIAS_OVERRIDE[candidato]), "OK"
                 if candidato in self._validos:
-                    return candidato, "OK"
+                    return self._a_unificado(candidato), "OK"
 
         # 4. No se pudo homologar — devolver normalizado y marcar para auditoria
         return base, "NO_HOMOLOGADO"
 
     def atributos(self, campo_canonico: str) -> dict:
-        """Devuelve UNIFICADO/VICEPRESIDENCIA/ACTIVO/... del campo (vacio si no existe)."""
+        """Devuelve UNIFICADO/VICEPRESIDENCIA/ACTIVO/... del campo (vacio si no
+        existe). Acepta nombres granulares y nombres UNIFICADO (downstream del
+        tablon solo conoce el UNIFICADO)."""
         if campo_canonico in self._dim.index:
             return self._dim.loc[campo_canonico].to_dict()
+        if campo_canonico in self._uni.index:
+            return self._uni.loc[campo_canonico].to_dict()
         return {}
 
     def homologar_serie(self, serie: pd.Series) -> pd.DataFrame:
@@ -179,8 +202,13 @@ if __name__ == "__main__":
     print(f"DIM_CAMPO cargada: {len(h._validos)} campos validos\n")
     pruebas = ["CASTILLA", "CASTILLA ESTE", "CASTILLA NORTE", "RUBIALES",
                "LA REFORMA", "LIBERTAD", "APIAY ESTE K", "Castilla_CF_SEC_23-Jan-2025.xlsx",
-               "ARRECIFE_FILIAL", "CAMPO INEXISTENTE XYZ"]
+               "ARRECIFE_FILIAL", "CAMPO INEXISTENTE XYZ",
+               # Renombres consolidados via UNIFICADO (2026-06-12)
+               "LLANITO", "LLANITO UNIFICADO", "QUIFA SUROESTE", "QUIFA", "GALAN"]
     for p in pruebas:
         campo, flag = h.homologar(p)
         uni = h.atributos(campo).get("UNIFICADO", "—")
-        print(f"  {p:<40} -> {campo:<22} [{flag}] uni={uni}")
+        # Idempotencia: re-homologar el resultado no debe moverlo
+        campo2, _ = h.homologar(campo)
+        idem = "" if campo2 == campo else f"  !! NO IDEMPOTENTE -> {campo2}"
+        print(f"  {p:<40} -> {campo:<22} [{flag}] uni={uni}{idem}")

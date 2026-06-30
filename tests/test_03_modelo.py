@@ -199,6 +199,70 @@ def test_pesos_por_nivel_multiclase():
     assert list(pesos) == [2.0, 2.0, 2.0, 3.0, 3.0, 6.0]
 
 
+def test_metricas_columnas_reanclaje(metricas):
+    """metricas.csv contiene las columnas del re-anclaje M1 (decision 2026-06-12)."""
+    for col in ["BRENT_REF_USD_BBL", "P_REF_USD_BBL", "DELTA_REF_ISO", "DELTA_REF_SUAVE"]:
+        assert col in metricas.columns, f"Falta columna de re-anclaje: {col}"
+    # BRENT_REF debe ser el mismo para todos los campos (parametro global del pipeline)
+    vals = metricas["BRENT_REF_USD_BBL"].dropna().unique()
+    assert len(vals) == 1, f"BRENT_REF debe ser unico pero hay {len(vals)} valores: {vals}"
+
+
+@pytest.mark.parametrize("campo", CAMPOS_PILOTO)
+def test_c5_vol_pref_igual_baseline(campo, tablon, metricas):
+    """C5: Vol(p_ref) == baseline del campo (re-anclaje exacto al punto actual)."""
+    from motores_modelo1 import volumen_anclado
+    row = metricas[metricas["CAMPO"] == campo]
+    if row.empty or pd.isna(row.iloc[0]["P_REF_USD_BBL"]):
+        pytest.skip(f"{campo}: sin p_ref en metricas")
+    row = row.iloc[0]
+    p_ref = float(row["P_REF_USD_BBL"])
+    dr_iso = float(row["DELTA_REF_ISO"])
+    baseline = float(
+        tablon[(tablon["CAMPO"] == campo) & (tablon["ESCENARIO"] == "BASE")
+               & tablon["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
+        .sort_values("AÑO")["VOLUMEN_1P_OFICIAL_MBPE"].iloc[-1]
+    )
+    slug = campo.replace(" ", "_")
+    ruta = MODELOS_DIR / f"{slug}_iso.joblib"
+    if not ruta.exists():
+        pytest.skip(f"Modelo iso de {campo} no encontrado")
+    iso = joblib.load(ruta)
+    v_ref = float(volumen_anclado(iso, [p_ref], baseline, dr_iso, bk_pdp=None)[0])
+    assert abs(v_ref - baseline) < 0.5, \
+        f"{campo}: C5 fallo — Vol(p_ref)={v_ref:.3f} vs baseline={baseline:.3f} (delta={abs(v_ref-baseline):.4f})"
+
+
+@pytest.mark.parametrize("campo", CAMPOS_PILOTO)
+def test_c6_hard_zero_sub_abandono(campo, tablon, metricas):
+    """C6: Vol(bk_pdp-5) == 0 (hard-zero por debajo del precio de abandono PDP)."""
+    from motores_modelo1 import volumen_anclado
+    row = metricas[metricas["CAMPO"] == campo]
+    if row.empty or pd.isna(row.iloc[0]["P_REF_USD_BBL"]):
+        pytest.skip(f"{campo}: sin metricas de re-anclaje")
+    row = row.iloc[0]
+    dr_iso = float(row["DELTA_REF_ISO"])
+    baseline = float(
+        tablon[(tablon["CAMPO"] == campo) & (tablon["ESCENARIO"] == "BASE")
+               & tablon["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
+        .sort_values("AÑO")["VOLUMEN_1P_OFICIAL_MBPE"].iloc[-1]
+    )
+    ancs = (tablon[(tablon["CAMPO"] == campo)]
+            .dropna(subset=["BK_ANCLA_PDP_USD_BBL"])
+            .sort_values("VIGENCIA_BREAKEVEN", ascending=False))
+    if ancs.empty:
+        pytest.skip(f"{campo}: sin ancla PDP en tablon")
+    bk_pdp = float(ancs.iloc[0]["BK_ANCLA_PDP_USD_BBL"])
+    slug = campo.replace(" ", "_")
+    ruta = MODELOS_DIR / f"{slug}_iso.joblib"
+    if not ruta.exists():
+        pytest.skip(f"Modelo iso de {campo} no encontrado")
+    iso = joblib.load(ruta)
+    v0 = float(volumen_anclado(iso, [bk_pdp - 5.0], baseline, dr_iso, bk_pdp)[0])
+    assert v0 == 0.0, \
+        f"{campo}: C6 fallo — Vol(bk_pdp-5={bk_pdp-5:.1f})={v0:.4f} (esperado 0.0)"
+
+
 def test_pneto_delta0():
     """pneto_delta0 encuentra el Precio Neto donde la curva delta cruza 0."""
     import importlib

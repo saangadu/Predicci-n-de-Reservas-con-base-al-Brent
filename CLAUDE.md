@@ -42,8 +42,13 @@ Prediccion/
 ├── requirements.txt
 ├── 01_etl.py                  ← ingesta + tablón único
 ├── 02_synthetic.py            ← inyección puntos sintéticos breakeven
-├── 03_modelo.py               ← XGBoost + Isotónica + LOO-CV + plots
-├── 04_pbi_export.py           ← meshgrid para Power BI
+├── 03_modelo.py               ← Modelo 1: Isotónica (primario) + Suave/PCHIP + LOO-CV + plots
+├── 03b_correlacion_brent.py   ← Modelo 2: Theil-Sen Neto = g(Brent) + bandas/escenarios
+├── 04_pbi_export.py           ← meshgrid Brent→(M2)→Neto→(M1)→Volumen para Power BI
+├── motores_modelo1.py         ← motores 1D candidatos (Isotónica, XGB-1D, Suave, Sigmoide)
+├── benchmark_modelo1.py       ← (offline) benchmark LOO-CV de motores 1D
+├── 06_comparativa_bk.py       ← (offline) anclaje BK ponderado vs clase de mayor incertidumbre
+├── experimento_vigencia.py    ← (offline) experimento centrado por año (descartado, ver MAESTRO §12)
 ├── datos/
 │   ├── raw/                   ← inputs originales (NO modificar)
 │   │   ├── HIST 1P.xlsx
@@ -51,15 +56,17 @@ Prediccion/
 │   │   ├── Breakeven.xlsm
 │   │   └── Codigo Breakeven
 │   └── staging/               ← outputs intermedios del pipeline
-│       ├── tablon_unico.parquet
-│       ├── tablon_unico.csv
+│       ├── tablon_unico.parquet / .csv
 │       ├── metricas.csv
-│       ├── modelos/           ← {campo}_xgb.joblib, {campo}_iso.joblib
-│       └── plots/             ← {campo}.png
+│       ├── correlacion_brent.csv      ← coeficientes Modelo 2
+│       ├── modelos/           ← {campo}_iso.joblib, {campo}_suave.joblib
+│       └── plots/ , plots_correlacion/
 ├── docs/
 │   ├── MAESTRO.md             ← fuente de verdad (leer siempre primero)
-│   ├── Modelos de Predicción de Reservas O&G.md   ← Deep Research (75 KB)
-│   └── Breakeven Resumen Técnico
+│   ├── NORTE.md               ← contrato de no-regresión (gate dorado)
+│   ├── CHANGELOG_PREDICCIONES.md
+│   ├── Breakeven Resumen Técnico
+│   └── archivo/               ← docs superados (3D, Path D, Deep Research) — ver README
 └── resultados/                ← output_matriz_prediccion.csv para Power BI
 ```
 
@@ -74,14 +81,14 @@ Prediccion/
 
 | Regla | Detalle |
 |---|---|
-| Monotonía obligatoria | Brent↑ → Reservas↑. Nunca violar. |
-| XGBoost primario | `monotone_constraints='(1,-1,-1)'` siempre presente |
-| Isotónica secundaria | `increasing=True, out_of_bounds='clip'` siempre presente |
-| RF descartado | Bagging suaviza step functions → inviable para auditorías |
-| Modelos por campo | NUNCA un modelo global. 1 XGBoost + 1 Isotónica por campo. |
-| Anclaje sintético | Puntos (precio < breakeven_financiero, vol=0) siempre inyectados |
-| Validación LOO-CV | `LeaveOneOut` por campo (N≈10 puntos → hold-out inestable) |
-| Métricas piloto | R²_LOO, MAE_LOO, RMSE_LOO son REFERENCIALES, no KPIs de producción |
+| Monotonía obligatoria | Brent↑ → Reservas↑. Nunca violar (garantizada por construcción en M1 y M2). |
+| Arquitectura 2 modelos (2026-06-11) | M1: Isotónica (primario) + Suave/PCHIP (validación), `Δ = f(Precio Neto)`. M2: Theil-Sen `Neto = α+β·Brent` (β>0). XGBoost 3D **retirado** (ver `docs/archivo/`). |
+| Isotónica primaria | `increasing=True, out_of_bounds='clip'` siempre presente |
+| RF / XGBoost descartados | RF suaviza step functions; XGBoost-1D fue el peor del benchmark → inviables como primario |
+| Modelos por campo | NUNCA un modelo global. 1 motor M1 + 1 recta M2 por campo. |
+| Anclaje sintético | Puntos (precio < breakeven, vol=0) siempre inyectados; BK_ANCLA_FIN = clase de mayor incertidumbre (PND→PNP→PDP) |
+| Validación LOO-CV | `LeaveOneOut` por campo (N≈10 puntos → hold-out inestable); también en M2 (R2_LOO/MAE_LOO) |
+| Métricas piloto | R²_LOO, MAE_LOO, RMSE_LOO, SKILL son REFERENCIALES, no KPIs de producción |
 
 ## Sanity checks funcionales (criterio de éxito del piloto)
 

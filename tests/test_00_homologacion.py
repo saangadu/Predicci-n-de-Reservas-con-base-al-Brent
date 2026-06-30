@@ -117,3 +117,59 @@ def test_homologar_serie_reporte(h):
     assert (res["HOMOLOG_FLAG"] == "NO_HOMOLOGADO").any()
     # reporte no crashea
     reporte_homologacion(res.rename(columns={"CAMPO": "CAMPO"}), "test")
+
+
+# ── Tests UNIFICADO: renombres entre vigencias (decision 2026-06-12) ─────────────
+
+
+def test_llanito_a_unificado(h):
+    """LLANITO (nombre vigencias 2017-2023) -> LLANITO UNIFICADO (clave consolidada)."""
+    campo, flag = h.homologar("LLANITO")
+    assert campo == "LLANITO UNIFICADO", f"Esperado LLANITO UNIFICADO, obtenido {campo}"
+    assert flag == "OK"
+
+
+def test_llanito_unificado_directo(h):
+    """LLANITO UNIFICADO existe en DIM y resuelve a si mismo."""
+    campo, flag = h.homologar("LLANITO UNIFICADO")
+    assert campo == "LLANITO UNIFICADO"
+    assert flag == "OK"
+
+
+def test_quifa_suroeste_a_quifa(h):
+    """QUIFA SUROESTE (nombre hasta 2024) -> QUIFA (clave UNIFICADO consolidada)."""
+    campo, flag = h.homologar("QUIFA SUROESTE")
+    assert campo == "QUIFA", f"Esperado QUIFA, obtenido {campo}"
+    assert flag == "OK"
+
+
+def test_quifa_directo(h):
+    """QUIFA resuelve a si mismo (nombre UNIFICADO)."""
+    campo, flag = h.homologar("QUIFA")
+    assert campo == "QUIFA"
+    assert flag == "OK"
+
+
+def test_galan_a_llanito_unificado(h):
+    """GALAN mapea a LLANITO UNIFICADO via DIM (nombre alternativo historico)."""
+    campo, flag = h.homologar("GALAN")
+    assert campo == "LLANITO UNIFICADO", f"Esperado LLANITO UNIFICADO, obtenido {campo}"
+    assert flag == "OK"
+
+
+def test_idempotencia_unificado(h):
+    """Re-homologar el resultado UNIFICADO no lo mueve (idempotencia garantizada)."""
+    for entrada in ["LLANITO", "LLANITO UNIFICADO", "QUIFA SUROESTE", "QUIFA", "GALAN"]:
+        campo, _ = h.homologar(entrada)
+        campo2, flag2 = h.homologar(campo)
+        assert campo2 == campo, \
+            f"No idempotente: {entrada} -> {campo} -> {campo2}"
+        assert flag2 == "OK", f"Re-homologacion de {campo} fallo ({flag2})"
+
+
+def test_atributos_acepta_unificado(h):
+    """atributos() responde para nombres UNIFICADO (downstream solo conoce UNIFICADO)."""
+    for nombre_uni in ["LLANITO UNIFICADO", "QUIFA"]:
+        attrs = h.atributos(nombre_uni)
+        assert isinstance(attrs, dict) and attrs, \
+            f"atributos('{nombre_uni}') retorno vacio: {attrs}"

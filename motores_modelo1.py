@@ -49,6 +49,25 @@ def _as_1d(x) -> np.ndarray:
     return np.asarray(x, dtype=float).ravel()
 
 
+def volumen_anclado(modelo, pneto, baseline: float, delta_ref: float,
+                    bk_pdp: float = None) -> np.ndarray:
+    """
+    Reconstruccion de volumen con RE-ANCLAJE en el punto actual (decision 2026-06-12):
+
+        Vol(p) = max(baseline + [f(p) − f(p_ref)], 0)
+
+    delta_ref = f(p_ref) se calcula una vez por campo×motor (p_ref = M2(BRENT_REF)).
+    Garantiza Vol(p_ref) = baseline: al precio actual las reservas son el ultimo 1P
+    certificado. El piso fisico vol=0 bajo el precio de abandono deja de salir de la
+    curva (el shift la desplaza) y se impone como regla dura p < bk_pdp -> 0.
+    """
+    pneto = _as_1d(pneto)
+    vol = np.maximum(baseline + modelo.predict(pneto) - delta_ref, 0.0)
+    if bk_pdp is not None and np.isfinite(bk_pdp):
+        vol = np.where(pneto < bk_pdp, 0.0, vol)
+    return vol
+
+
 class MotorIsotonico:
     """Regresion isotonica creciente con clip fuera de rango. Motor PRIMARIO candidato:
     respeta exactamente la escalera de anclas sinteticas sin suavizar los escalones."""
