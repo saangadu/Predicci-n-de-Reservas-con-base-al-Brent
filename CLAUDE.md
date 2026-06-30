@@ -17,12 +17,17 @@ Leer `docs/MAESTRO.md` ANTES de modificar cualquier archivo de este subproyecto.
 Ese documento contiene la fuente de verdad: inventario de datos, esquema del tablón único,
 motor matemático, decisiones vigentes, supuestos y limitantes. Actualizar tras cada sesión.
 
-## Alcance actual (Fase 1 — completada 2026-06-05)
+## Alcance actual (Fase 2 — completada 2026-06-30)
 
-- **Campos**: 135 campos `Incluir=Si` del Consolidado (portafolio completo)
-- **Gate dorado**: CASTILLA, CASTILLA NORTE, CASTILLA ESTE, RUBIALES (siempre validados)
-- **Tests**: 88/88 verdes. `run_pipeline.py` exit 0 (6 fases, ~10 min). Listo para corrida 2Q 2026.
-- **Fase 2+**: VECM, Kalman, DCA, OOIP cap (backlog).
+- **Campos**: portafolio completo con homologación a UNIFICADO (34 familias fusionadas; clave final = DIM_CAMPO.xlsx columna UNIFICADO).
+- **Gate dorado**: CASTILLA, CASTILLA NORTE, CASTILLA ESTE, RUBIALES (siempre validados).
+- **Tests**: 7/7 gates PASS. `run_pipeline.py` exit 0 (7 fases, ~12 min). Corrida 2Q 2026 completada.
+- **Arquitectura vigente**:
+  - M2 solo-HIST: Theil-Sen `Aceite = α + β·Brent` entrenado únicamente con cierres reales (sin quarters Consolidado). R² mediana 0.963; fallback k·Brent para 157 campos sin historia (`ES_FALLBACK=True`).
+  - M1 re-anclado: `Vol(p) = max(baseline + [f(p) − f(p_ref)], 0)`. `p_ref = M2(BRENT_REF=68.01 USD/bbl)`. Garantiza Vol(BRENT_REF) = 1P certificado más reciente. Hard-zero: `p_neto < BK_PDP → Vol=0`.
+  - 3 matrices de output: `output_matriz_modelo1.csv` (M1 puro), `output_matriz_modelo2.csv` (M2 puro), `output_matriz_prediccion.csv` (cadena completa).
+- **Aviso PBI**: `ESCENARIO_DESCUENTO` eliminado del output — actualizar DAX antes de publicar tablero.
+- **Fase 3+**: VECM, Kalman, DCA, OOIP cap (backlog).
 
 ## Stack tecnológico
 
@@ -43,8 +48,8 @@ Prediccion/
 ├── 01_etl.py                  ← ingesta + tablón único
 ├── 02_synthetic.py            ← inyección puntos sintéticos breakeven
 ├── 03_modelo.py               ← Modelo 1: Isotónica (primario) + Suave/PCHIP + LOO-CV + plots
-├── 03b_correlacion_brent.py   ← Modelo 2: Theil-Sen Neto = g(Brent) + bandas/escenarios
-├── 04_pbi_export.py           ← meshgrid Brent→(M2)→Neto→(M1)→Volumen para Power BI
+├── 03b_correlacion_brent.py   ← Modelo 2: Theil-Sen Aceite = α+β·Brent (solo HIST, sin escenarios)
+├── 04_pbi_export.py           ← 3 matrices Brent→(M2)→Neto→(M1)→Volumen para Power BI
 ├── motores_modelo1.py         ← motores 1D candidatos (Isotónica, XGB-1D, Suave, Sigmoide)
 ├── benchmark_modelo1.py       ← (offline) benchmark LOO-CV de motores 1D
 ├── 06_comparativa_bk.py       ← (offline) anclaje BK ponderado vs clase de mayor incertidumbre
@@ -67,7 +72,7 @@ Prediccion/
 │   ├── CHANGELOG_PREDICCIONES.md
 │   ├── Breakeven Resumen Técnico
 │   └── archivo/               ← docs superados (3D, Path D, Deep Research) — ver README
-└── resultados/                ← output_matriz_prediccion.csv para Power BI
+└── resultados/                ← output_matriz_modelo1/modelo2/prediccion.csv para Power BI
 ```
 
 ## Idioma y estilo de código
@@ -82,7 +87,7 @@ Prediccion/
 | Regla | Detalle |
 |---|---|
 | Monotonía obligatoria | Brent↑ → Reservas↑. Nunca violar (garantizada por construcción en M1 y M2). |
-| Arquitectura 2 modelos (2026-06-11) | M1: Isotónica (primario) + Suave/PCHIP (validación), `Δ = f(Precio Neto)`. M2: Theil-Sen `Neto = α+β·Brent` (β>0). XGBoost 3D **retirado** (ver `docs/archivo/`). |
+| Arquitectura 2 modelos (2026-06-12) | M1: Isotónica (primario) + Suave/PCHIP (validación), `Vol(p)=max(baseline+[f(p)−f(p_ref)],0)`. M2: Theil-Sen `Aceite=α+β·Brent` solo-HIST (β>0); fallback k·Brent taggeado. XGBoost 3D **retirado** (ver `docs/archivo/`). |
 | Isotónica primaria | `increasing=True, out_of_bounds='clip'` siempre presente |
 | RF / XGBoost descartados | RF suaviza step functions; XGBoost-1D fue el peor del benchmark → inviables como primario |
 | Modelos por campo | NUNCA un modelo global. 1 motor M1 + 1 recta M2 por campo. |
@@ -90,12 +95,14 @@ Prediccion/
 | Validación LOO-CV | `LeaveOneOut` por campo (N≈10 puntos → hold-out inestable); también en M2 (R2_LOO/MAE_LOO) |
 | Métricas piloto | R²_LOO, MAE_LOO, RMSE_LOO, SKILL son REFERENCIALES, no KPIs de producción |
 
-## Sanity checks funcionales (criterio de éxito del piloto)
+## Sanity checks funcionales (criterio de éxito)
 
-1. `Precio Neto < Breakeven` → predicción ≈ 0 en ambos motores
-2. Monotonía visible en plots (sin tramos decrecientes)
-3. Asíntota superior visible (saturación cerca del máximo histórico)
-4. Divergencia XGBoost ↔ Isotónica < 30% en banda histórica observada ($40–$80)
+1. `p_neto < BK_PDP` → Vol = 0 (hard-zero, C6)
+2. `Vol(BRENT_REF) = baseline` del campo exacto (re-anclaje, C5, tolerancia < 0.5 MBPE)
+3. Monotonía en plots (sin tramos decrecientes)
+4. Asíntota superior visible (saturación cerca del máximo histórico)
+5. Divergencia Isotónica ↔ Suave < 30% en banda histórica observada ($40–$80)
+6. M2 `ES_FALLBACK=True` visible y taggeado en los 3 outputs para campos sin historia propia
 
 ## Notas críticas de parsing
 
