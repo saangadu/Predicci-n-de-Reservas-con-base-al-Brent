@@ -1,0 +1,338 @@
+/// Tabla de hechos: predicción de reservas 1P por Campo × Motor × Brent. Grano = 1 fila por combinación. Cadena M2 (Brent→Precio Neto) → M1 (Precio→Volumen). TIPO_DATO = PREDICCIÓN.
+table Predicción
+	lineageTag: 8db16789-46ec-4b7d-a9c6-c163847f5e68
+
+	column 'Campo Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 5134e7e4-e139-40dc-87cd-1ef87ff37857
+		summarizeBy: none
+		sourceColumn: CAMPO
+
+	column 'Motor Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 463b13d8-0154-41e0-b267-0f38d9a28133
+		summarizeBy: none
+		sourceColumn: MOTOR
+
+	column 'Brent Clave (USD/bbl)'
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: fe6b78d9-fe77-4470-ab91-66acb072a89e
+		summarizeBy: none
+		sourceColumn: BRENT_USD_BBL
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Precio neto realizado que sale de M2 (Brent − descuentos, absorbidos en β).
+	column 'Precio Neto Efectivo (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: 1e9326a7-ede1-44a3-80f8-201c0dfcd09f
+		summarizeBy: sum
+		sourceColumn: PRECIO_NETO_EFECTIVO_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Delta anclado de reservas = f(p) − f(p_ref).
+	column 'Delta Predicho (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		displayFolder: 1. Volúmenes
+		lineageTag: 44c2af04-dabd-49c0-907c-53228cbc1e5e
+		summarizeBy: sum
+		sourceColumn: DELTA_PRED_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	/// 1P certificado más reciente del campo.
+	column 'Volumen 1P Baseline (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		displayFolder: 1. Volúmenes
+		lineageTag: ac507989-23f7-44c4-ab64-9e53ed6f9655
+		summarizeBy: sum
+		sourceColumn: VOLUMEN_1P_BASELINE_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	/// max(baseline + delta, 0). Hard-zero bajo breakeven.
+	column 'Volumen 1P Predicho (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		displayFolder: 1. Volúmenes
+		lineageTag: 3c856260-17a7-46d0-8b03-7e00b7dfce07
+		summarizeBy: sum
+		sourceColumn: VOLUMEN_1P_PREDICHO_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Delta vs Base (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		displayFolder: 1. Volúmenes
+		lineageTag: b74653d8-e9f9-4c2e-8952-933f4d5ad787
+		summarizeBy: sum
+		sourceColumn: DELTA_VS_BASE_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Delta vs Base (%)'
+		dataType: double
+		formatString: #,##0.0
+		displayFolder: 1. Volúmenes
+		lineageTag: 47bd1a67-dba2-4bf9-ae4b-876a51516eb0
+		summarizeBy: sum
+		sourceColumn: DELTA_VS_BASE_PCT
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Brent ancla (~68.01) donde Vol Predicho = Baseline exacto.
+	column 'Brent Ref (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 6. Metadatos
+		lineageTag: b5416707-c179-4c6c-af9d-f7706eac60fb
+		summarizeBy: sum
+		sourceColumn: BRENT_REF_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Precio Ref (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: ce0c4a71-b406-4852-bb17-3d33325b70f6
+		summarizeBy: sum
+		sourceColumn: P_REF_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	/// THEILSEN | PROPORCIONAL | FALLBACK_BETA_PORTAFOLIO.
+	column 'M2 Método'
+		dataType: string
+		displayFolder: 5. Calidad Modelo
+		lineageTag: 87815826-3f81-41da-9b30-f4336d6bdf1c
+		summarizeBy: none
+		sourceColumn: M2_METODO
+
+	/// True = campo sin relación Aceite~Brent propia, usa k del portafolio.
+	column 'M2 Es Fallback'
+		dataType: boolean
+		displayFolder: 5. Calidad Modelo
+		lineageTag: e27da612-cfe6-4d11-bb3d-c71bc9f1ab97
+		summarizeBy: none
+		sourceColumn: M2_ES_FALLBACK
+
+	column 'M2 N Puntos'
+		dataType: int64
+		displayFolder: 5. Calidad Modelo
+		lineageTag: c80b5728-1ba1-467a-8836-5a37f8cdd0c0
+		summarizeBy: sum
+		sourceColumn: M2_N_PUNTOS
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'M2 R² LOO'
+		dataType: double
+		formatString: 0.000
+		displayFolder: 5. Calidad Modelo
+		lineageTag: 8252389f-0dce-4efa-8df0-183bb3adc3f5
+		summarizeBy: sum
+		sourceColumn: M2_R2_LOO
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'M2 Frágil'
+		dataType: boolean
+		displayFolder: 5. Calidad Modelo
+		lineageTag: dbf5536f-047e-4f36-9890-8245155ce8b7
+		summarizeBy: none
+		sourceColumn: M2_FRAGIL
+
+	/// Pendiente M1 no separable del cambio de vigencia (confound).
+	column 'Sensibilidad No Identificada'
+		dataType: boolean
+		displayFolder: 5. Calidad Modelo
+		lineageTag: 0eec0225-4f1b-4921-b537-1130898dc1da
+		summarizeBy: none
+		sourceColumn: SENSIBILIDAD_NO_IDENTIFICADA
+
+	column 'Confound η²'
+		dataType: double
+		formatString: 0.000
+		displayFolder: 5. Calidad Modelo
+		lineageTag: 9ca9e663-7732-4953-9c21-6200125f1030
+		summarizeBy: sum
+		sourceColumn: CONFOUND_ETA2
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Breakeven Financiero (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 3. Breakevens
+		lineageTag: 6e96f1c7-0135-4ee7-8b81-375d23b53524
+		summarizeBy: sum
+		sourceColumn: BREAKEVEN_FINANCIERO_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Breakeven Operacional (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 3. Breakevens
+		lineageTag: 8cd2c295-d468-457e-830c-7754071e8886
+		summarizeBy: sum
+		sourceColumn: BREAKEVEN_OPERACIONAL_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	/// BK global ponderado 1P (una cifra por campo).
+	column 'BK Referencia Financiero (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 3. Breakevens
+		lineageTag: 6ccc5c38-3fbd-4201-b7a0-ae1b4d36e904
+		summarizeBy: sum
+		sourceColumn: BK_REFERENCIA_FIN_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'BK Referencia Operacional (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 3. Breakevens
+		lineageTag: bcfc0120-932a-429b-8ba2-47437e526f89
+		summarizeBy: sum
+		sourceColumn: BK_REFERENCIA_OPE_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Precio Neto ≥ Breakeven Operacional (conserva algo de 1P).
+	column 'Es Viable'
+		dataType: boolean
+		displayFolder: 4. Viabilidad
+		lineageTag: e53fa380-2783-4c4a-b88a-e4db2f704198
+		summarizeBy: none
+		sourceColumn: ES_VIABLE
+
+	column 'Es Full Reservas'
+		dataType: boolean
+		displayFolder: 4. Viabilidad
+		lineageTag: 7aadd537-56cb-4698-acd2-b187f086e0bb
+		summarizeBy: none
+		sourceColumn: ES_FULL_RESERVAS
+
+	/// Brent fuera de la banda observada del campo ± $5.
+	column 'Es Extrapolado'
+		dataType: boolean
+		displayFolder: 4. Viabilidad
+		lineageTag: abe19396-2ed8-45d5-97ae-870fa9925091
+		summarizeBy: none
+		sourceColumn: ES_EXTRAPOLADO
+
+	column 'Tipo Dato'
+		dataType: string
+		displayFolder: 6. Metadatos
+		lineageTag: 5528f863-4174-4ccd-adfe-7538cd0f5560
+		summarizeBy: none
+		sourceColumn: TIPO_DATO
+
+	column 'Q Objetivo'
+		dataType: string
+		displayFolder: 6. Metadatos
+		lineageTag: 45b6ed05-51de-4095-9bf6-4a4f113f421b
+		summarizeBy: none
+		sourceColumn: Q_OBJETIVO
+
+	column 'Vigencia Base'
+		dataType: string
+		displayFolder: 6. Metadatos
+		lineageTag: 197f6c52-4d71-400f-adfd-f3df35761533
+		summarizeBy: none
+		sourceColumn: VIGENCIA_BASE
+
+	column 'Fecha Predicción'
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		displayFolder: 6. Metadatos
+		lineageTag: 45eef63e-1b31-475e-8b35-fdd1edb23ac1
+		summarizeBy: none
+		sourceColumn: FECHA_PREDICCION
+
+		variation Variation
+			isDefault
+			relationship: 1b7f0fcd-44e3-47ce-a683-8e8862d003e1
+			defaultHierarchy: LocalDateTable_e3e48511-2aa2-4383-8a0b-665cc6c3dbf9.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column 'N Real Delta'
+		dataType: int64
+		displayFolder: 5. Calidad Modelo
+		lineageTag: d2ff7446-a742-4483-b005-88e0862140fa
+		summarizeBy: sum
+		sourceColumn: N_REAL_DELTA
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'MAE Rel LOO'
+		dataType: double
+		formatString: 0.0%
+		displayFolder: 5. Calidad Modelo
+		lineageTag: 0004e614-a9be-4c92-bea3-f79ec59c247c
+		summarizeBy: sum
+		sourceColumn: MAE_REL_LOO
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Divergencia Motores (%)'
+		dataType: double
+		formatString: 0.0%
+		displayFolder: 5. Calidad Modelo
+		lineageTag: 2c1f11bc-7dce-4771-b486-5f437ac95895
+		summarizeBy: sum
+		sourceColumn: DIVERGENCIA_MOTORES_PCT
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Alerta LOO Outlier'
+		dataType: boolean
+		displayFolder: 5. Calidad Modelo
+		lineageTag: a15faafa-9d26-4faf-99b8-e05e4a50e215
+		summarizeBy: none
+		sourceColumn: ALERTA_LOO_OUTLIER_ISO
+
+	/// ALTA | MEDIA | BAJA | SOLO_SINTETICO.
+	column 'Nivel Confianza'
+		dataType: string
+		displayFolder: 5. Calidad Modelo
+		lineageTag: 5f13f15f-b373-4743-852f-3435243071ab
+		summarizeBy: none
+		sourceColumn: NIVEL_CONFIANZA
+
+	column 'Motivo Confianza'
+		dataType: string
+		displayFolder: 5. Calidad Modelo
+		lineageTag: a73e6cd7-b71e-4c82-8948-78b878492649
+		summarizeBy: none
+		sourceColumn: MOTIVO_CONFIANZA
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_matriz_prediccion.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    Tipos = Table.TransformColumnTypes(Prom, {{"CAMPO", type text}, {"MOTOR", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_EFECTIVO_USD_BBL", type number}, {"DELTA_PRED_MBPE", type number}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"DELTA_VS_BASE_MBPE", type number}, {"DELTA_VS_BASE_PCT", type number}, {"BRENT_REF_USD_BBL", type number}, {"P_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"BREAKEVEN_FINANCIERO_USD_BBL", type number}, {"BREAKEVEN_OPERACIONAL_USD_BBL", type number}, {"BK_REFERENCIA_FIN_USD_BBL", type number}, {"BK_REFERENCIA_OPE_USD_BBL", type number}, {"ES_VIABLE", type logical}, {"ES_FULL_RESERVAS", type logical}, {"ES_EXTRAPOLADO", type logical}, {"TIPO_DATO", type text}, {"Q_OBJETIVO", type text}, {"VIGENCIA_BASE", type text}, {"FECHA_PREDICCION", type date}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}}, "en-US")
+				in
+				    Tipos
+
+	annotation PBI_ResultType = Table
+

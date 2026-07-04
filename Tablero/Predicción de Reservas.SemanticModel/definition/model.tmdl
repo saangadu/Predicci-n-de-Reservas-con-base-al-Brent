@@ -1,0 +1,27 @@
+model Model
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	discourageImplicitMeasures
+	sourceQueryCulture: es-CO
+	dataAccessOptions
+		legacyRedirects
+		returnErrorValuesAsNull
+
+annotation __PBI_TimeIntelligenceEnabled = 1
+
+annotation PBI_ProTooling = ["DevMode","MCP-PBIModeling"]
+
+annotation PBI_QueryOrder = ["Predicción","Diagnóstico M1","Diagnóstico M2","Precio Brent","Motor","Campo","_Medidas","RutaBase"]
+
+ref table Predicción
+ref table 'Diagnóstico M1'
+ref table 'Diagnóstico M2'
+ref table 'Precio Brent'
+ref table Motor
+ref table Campo
+ref table _Medidas
+ref table DateTableTemplate_25a179f5-2860-4d96-ac3f-68685b168010
+ref table LocalDateTable_e3e48511-2aa2-4383-8a0b-665cc6c3dbf9
+
+ref cultureInfo en-US
+

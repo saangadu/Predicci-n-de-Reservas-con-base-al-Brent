@@ -1,0 +1,34 @@
+/// Dimensión de motor M1: Isotonica (primario) vs Suave (validación PCHIP).
+table Motor
+	lineageTag: 10f976b1-774b-427a-af2d-7b7e710b75ac
+
+	column Motor
+		dataType: string
+		isKey
+		lineageTag: 7e4841dd-13d7-4645-b401-393a49c3c09d
+		summarizeBy: none
+		sourceColumn: MOTOR
+		sortByColumn: Orden
+
+	column Descripción
+		dataType: string
+		lineageTag: 771c7b4e-073d-4022-84b8-7168c41b58a0
+		summarizeBy: none
+		sourceColumn: DESCRIPCION
+
+	column Orden
+		dataType: int64
+		isHidden
+		lineageTag: b78be2f4-8ecc-41a1-96f4-96d8946599bb
+		summarizeBy: none
+		sourceColumn: ORDEN
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Fuente = Table.FromRecords({[MOTOR="Isotonica", DESCRIPCION="Primario — isotónica, monótona por construcción", ORDEN=1], [MOTOR="Suave", DESCRIPCION="Validación — PCHIP suavizado", ORDEN=2]}),
+				    Tipos = Table.TransformColumnTypes(Fuente, {{"MOTOR", type text}, {"DESCRIPCION", type text}, {"ORDEN", Int64.Type}})
+				in
+				    Tipos
+

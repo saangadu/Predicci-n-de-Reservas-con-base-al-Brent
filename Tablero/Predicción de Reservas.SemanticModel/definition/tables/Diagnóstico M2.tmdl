@@ -1,0 +1,118 @@
+/// Diagnóstico Modelo 2 (Theil-Sen Aceite = α + β·Brent) por Campo×Brent. Coeficientes y bondad de ajuste; relación a Precio Brent y Campo.
+table 'Diagnóstico M2'
+	lineageTag: d3e8277e-66f6-4469-9d60-6c41061adc76
+
+	column 'Campo Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 7f2e72c8-d333-401d-a705-618c172791b4
+		summarizeBy: none
+		sourceColumn: CAMPO
+
+	column 'Brent Clave (USD/bbl)'
+		dataType: double
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 742a146f-7e2a-4d7d-825b-bf929f86a6e8
+		summarizeBy: none
+		sourceColumn: BRENT_USD_BBL
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	/// Predicho = α + β·Brent.
+	column 'Precio Aceite (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: 0df887ad-6333-449c-9ec5-24ca4e7f3fd6
+		summarizeBy: sum
+		sourceColumn: PRECIO_ACEITE_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	column Alpha
+		dataType: double
+		formatString: 0.0000
+		lineageTag: 56d71cb2-ea20-4ac8-bf48-517f3cf3e1a8
+		summarizeBy: sum
+		sourceColumn: ALPHA
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Sensibilidad del precio aceite al Brent.
+	column Beta
+		dataType: double
+		formatString: 0.0000
+		lineageTag: 7ae050fc-55d3-4cf4-919c-70e0211ac3f2
+		summarizeBy: sum
+		sourceColumn: BETA
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'M2 Método'
+		dataType: string
+		lineageTag: ba4bedbb-3a4b-4a76-b15b-754f11f2e759
+		summarizeBy: none
+		sourceColumn: M2_METODO
+
+	column 'M2 Es Fallback'
+		dataType: boolean
+		lineageTag: 7eca5dfe-fe5b-4d4d-b694-ab8bbcc13f5c
+		summarizeBy: none
+		sourceColumn: M2_ES_FALLBACK
+
+	column 'N Puntos'
+		dataType: int64
+		lineageTag: 7cbca31c-7fed-4527-b306-27723a6506c8
+		summarizeBy: none
+		sourceColumn: N_PUNTOS
+
+	column R²
+		dataType: double
+		formatString: 0.000
+		lineageTag: e4a85ca7-b938-4e4d-9450-03d5cd291e09
+		summarizeBy: sum
+		sourceColumn: R2
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'R² LOO'
+		dataType: double
+		formatString: 0.000
+		lineageTag: 393e3532-a7b9-440a-b795-4e1a4a193306
+		summarizeBy: sum
+		sourceColumn: R2_LOO
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'MAE LOO'
+		dataType: double
+		formatString: #,##0.00
+		lineageTag: 638bc093-9d1a-4b4b-98cc-685fa9913494
+		summarizeBy: sum
+		sourceColumn: MAE_LOO
+
+		annotation SummarizationSetBy = Automatic
+
+	column Alerta
+		dataType: string
+		lineageTag: a776a83d-a03d-456e-9fe6-c7a94135164b
+		summarizeBy: none
+		sourceColumn: ALERTA
+
+	column 'M2 Frágil'
+		dataType: boolean
+		lineageTag: 3191e834-91ad-4c80-a358-cd31a8d56165
+		summarizeBy: none
+		sourceColumn: M2_FRAGIL
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_matriz_modelo2.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    Tipos = Table.TransformColumnTypes(Prom, {{"CAMPO", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_ACEITE_USD_BBL", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"N_PUNTOS", Int64.Type}, {"R2", type number}, {"R2_LOO", type number}, {"MAE_LOO", type number}, {"ALERTA", type text}, {"M2_FRAGIL", type logical}}, "en-US")
+				in
+				    Tipos
+

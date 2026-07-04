@@ -1,0 +1,85 @@
+/// Dimensión de campo (clave = UNIFICADO homologado). Jerarquía organizacional + geo. Filtrada a los campos presentes en la predicción.
+table Campo
+	lineageTag: 669e1877-0d8b-43dd-a1a8-3102625f5499
+
+	/// Clave homologada (columna UNIFICADO del DIM). Une con la tabla de hechos.
+	column Campo
+		dataType: string
+		isKey
+		lineageTag: 9c5986ed-c130-4ed8-903b-1e581ee129dd
+		summarizeBy: none
+		sourceColumn: UNIFICADO
+
+	column Vicepresidencia
+		dataType: string
+		lineageTag: b42f6dc8-4efd-495e-8164-9a1de8728fd1
+		summarizeBy: none
+		sourceColumn: VICEPRESIDENCIA
+
+	column 'Gerencia Desarrollo'
+		dataType: string
+		lineageTag: e5e5ac9b-4dd4-41cc-9919-38a371d2e406
+		summarizeBy: none
+		sourceColumn: GERENCIA D.
+
+	column Activo
+		dataType: string
+		lineageTag: 6f395420-db7e-4083-a66e-a0ddbfb0d566
+		summarizeBy: none
+		sourceColumn: ACTIVO
+
+	column Empresa
+		dataType: string
+		lineageTag: d27d7acd-dc46-4ae1-8872-c6402ace2d9f
+		summarizeBy: none
+		sourceColumn: EMPRESA
+
+	column País
+		dataType: string
+		lineageTag: 049edb4f-5b8b-40e5-8b9c-ea69ad833475
+		summarizeBy: none
+		sourceColumn: PAIS
+
+	column Regional
+		dataType: string
+		lineageTag: a5b20418-ae78-404b-be5b-bb5e9251f1a4
+		summarizeBy: none
+		sourceColumn: NEW REGIONAL
+
+	column Latitud
+		dataType: double
+		lineageTag: 0c70191c-5f49-41ea-be72-52214d91437e
+		dataCategory: Latitude
+		summarizeBy: sum
+		sourceColumn: LATITUD
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column Longitud
+		dataType: double
+		lineageTag: 99065be6-8ca1-419b-a803-338d9c175eb0
+		dataCategory: Longitude
+		summarizeBy: sum
+		sourceColumn: LONGITUD
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Libro = Excel.Workbook(File.Contents(RutaBase & "\datos\raw\DIM_CAMPO.xlsx"), null, true),
+				    Hoja = Libro{[Kind="Sheet"]}[Data],
+				    Prom = Table.PromoteHeaders(Hoja, [PromoteAllScalars=true]),
+				    Sel = Table.SelectColumns(Prom, {"UNIFICADO", "VICEPRESIDENCIA", "GERENCIA D.", "ACTIVO", "EMPRESA", "PAIS", "NEW REGIONAL", "LATITUD", "LONGITUD"}, MissingField.UseNull),
+				    Dedup = Table.Distinct(Sel, {"UNIFICADO"}),
+				    camposFact = List.Distinct(#"Predicción"[CAMPO]),
+				    Filtrado = Table.SelectRows(Dedup, each List.Contains(camposFact, [UNIFICADO])),
+				    Tipos = Table.TransformColumnTypes(Filtrado, {{"UNIFICADO", type text}, {"VICEPRESIDENCIA", type text}, {"GERENCIA D.", type text}, {"ACTIVO", type text}, {"EMPRESA", type text}, {"PAIS", type text}, {"NEW REGIONAL", type text}, {"LATITUD", type number}, {"LONGITUD", type number}})
+				in
+				    Tipos
+

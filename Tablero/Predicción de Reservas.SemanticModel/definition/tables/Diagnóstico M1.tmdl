@@ -1,0 +1,93 @@
+/// Diagnóstico Modelo 1 (Isotónica/Suave): curva Volumen vs Precio Aceite por Campo×Motor. Drill-through de auditoría; sin relación a Precio Brent (eje = precio aceite).
+table 'Diagnóstico M1'
+	lineageTag: 0c33e82c-94b8-446b-a38f-1e376aa50b3d
+
+	column 'Campo Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: d3e362fa-6537-400a-8f19-452c09a3e80c
+		summarizeBy: none
+		sourceColumn: CAMPO
+
+	column 'Motor Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a0feef47-0487-481d-8e70-ca220085613d
+		summarizeBy: none
+		sourceColumn: MOTOR
+
+	column 'Precio Aceite (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: 452914e5-a318-41a0-836f-7b2b801faa2d
+		summarizeBy: sum
+		sourceColumn: PRECIO_ACEITE_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Delta Anclado (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: cc121df9-7c23-43ae-b23a-5ea8955caae9
+		summarizeBy: sum
+		sourceColumn: DELTA_ANCLADO_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Volumen 1P Predicho (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: e0f62af2-792e-44e9-a0c7-05da32f53e47
+		summarizeBy: sum
+		sourceColumn: VOLUMEN_1P_PREDICHO_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Volumen 1P Baseline (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: aa45f184-bf02-4738-a0dd-5cbce20d96cd
+		summarizeBy: sum
+		sourceColumn: VOLUMEN_1P_BASELINE_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Precio Ref (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: 64ef6c60-7b9e-4ce7-9917-05e787a2f85d
+		summarizeBy: sum
+		sourceColumn: P_REF_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Breakeven Financiero (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: 4ee17654-fb22-4a64-b53d-cc664b29bfdc
+		summarizeBy: sum
+		sourceColumn: BREAKEVEN_FINANCIERO_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Breakeven Operacional (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: 6e3c0b26-15b8-436a-9b74-83481217cf87
+		summarizeBy: sum
+		sourceColumn: BREAKEVEN_OPERACIONAL_USD_BBL
+
+		annotation SummarizationSetBy = Automatic
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_matriz_modelo1.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    Tipos = Table.TransformColumnTypes(Prom, {{"CAMPO", type text}, {"MOTOR", type text}, {"PRECIO_ACEITE_USD_BBL", type number}, {"DELTA_ANCLADO_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"BREAKEVEN_FINANCIERO_USD_BBL", type number}, {"BREAKEVEN_OPERACIONAL_USD_BBL", type number}}, "en-US")
+				in
+				    Tipos
+

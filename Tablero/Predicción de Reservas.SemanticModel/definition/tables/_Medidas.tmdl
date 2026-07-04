@@ -1,0 +1,157 @@
+/// Tabla contenedora de medidas. Sin datos. Carpetas: Volumen, Price Intelligence, Confiabilidad.
+table _Medidas
+	lineageTag: 5bdd61f1-b1ba-4ca0-bec3-8a66345d2c0f
+
+	/// Suma del volumen 1P predicho. Por defecto usa el motor Isotonica si no hay uno seleccionado (evita doble conteo entre motores). Responde al slicer de Brent.
+	measure 'Vol 1P Predicho' =
+			VAR _motor = IF ( HASONEVALUE ( 'Motor'[Motor] ), VALUES ( 'Motor'[Motor] ), "Isotonica" )
+			RETURN
+			CALCULATE ( SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] ), KEEPFILTERS ( 'Motor'[Motor] = _motor ) )
+		formatString: #,##0.0
+		displayFolder: 1. Volumen
+		lineageTag: e7cec50d-8099-40d8-b177-83a1b40dfc11
+
+	/// 1P certificado base. Independiente de Brent y Motor (constante por campo).
+	measure 'Vol 1P Baseline' = SUMX ( VALUES ( 'Campo'[Campo] ), CALCULATE ( MAX ( 'Predicción'[Volumen 1P Baseline (MBPE)] ) ) )
+		formatString: #,##0.0
+		displayFolder: 1. Volumen
+		lineageTag: c639524e-85a4-40b7-985e-05819ed4bdb0
+
+	/// Volumen predicho menos baseline.
+	measure 'Delta vs Base (MBPE)' = [Vol 1P Predicho] - [Vol 1P Baseline]
+		formatString: #,##0.0
+		displayFolder: 1. Volumen
+		lineageTag: 664e0531-dec8-43cf-ac31-90ab6798d334
+
+	measure 'Delta vs Base %' = DIVIDE ( [Delta vs Base (MBPE)], [Vol 1P Baseline] )
+		formatString: 0.0%
+		displayFolder: 1. Volumen
+		lineageTag: dbd6b3c8-84d9-4139-a20a-c4ff9d428632
+
+	measure '# Campos' = DISTINCTCOUNT ( 'Predicción'[Campo Clave] )
+		formatString: #,##0
+		displayFolder: 1. Volumen
+		lineageTag: f4907f34-b7f3-4095-abeb-5f89755bad48
+
+	/// Campos con Precio Neto >= Breakeven Operacional al Brent seleccionado.
+	measure '# Campos Viables' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Es Viable] = TRUE () ) )
+		formatString: #,##0
+		displayFolder: 1. Volumen
+		lineageTag: 9838377e-0f0b-4f4c-8c62-e172a4b95fd3
+
+	measure '# Campos Full Reservas' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Es Full Reservas] = TRUE () ) )
+		formatString: #,##0
+		displayFolder: 1. Volumen
+		lineageTag: 7cfc01e8-8669-46e3-bd82-df32ca3a089d
+
+	measure '% Volumen Viable' = DIVIDE ( CALCULATE ( [Vol 1P Predicho], KEEPFILTERS ( 'Predicción'[Es Viable] = TRUE () ) ), [Vol 1P Predicho] )
+		formatString: 0.0%
+		displayFolder: 1. Volumen
+		lineageTag: 6f95e5b1-ad90-4a19-b607-dfd91285b334
+
+	/// Precio Brent seleccionado en el slicer.
+	measure 'Brent Escenario (USD/bbl)' = SELECTEDVALUE ( 'Precio Brent'[Brent (USD/bbl)] )
+		formatString: $#,##0.00
+		displayFolder: 2. Price Intelligence
+		lineageTag: 4a5317ba-2d89-47af-971f-e5fcbe9801c8
+
+	/// Volumen predicho si el Brent sube 5 USD (análogo period-over-period sobre el eje precio).
+	measure 'Vol @ Brent +5' =
+			VAR b = SELECTEDVALUE ( 'Precio Brent'[Brent (USD/bbl)] )
+			RETURN IF ( NOT ISBLANK ( b ), CALCULATE ( [Vol 1P Predicho], REMOVEFILTERS ( 'Precio Brent' ), 'Precio Brent'[Brent (USD/bbl)] = b + 5 ) )
+		formatString: #,##0.0
+		displayFolder: 2. Price Intelligence
+		lineageTag: 92859479-6ea6-467c-af11-b643f9f2aa2a
+
+	/// Volumen predicho si el Brent baja 5 USD.
+	measure 'Vol @ Brent -5' =
+			VAR b = SELECTEDVALUE ( 'Precio Brent'[Brent (USD/bbl)] )
+			RETURN IF ( NOT ISBLANK ( b ), CALCULATE ( [Vol 1P Predicho], REMOVEFILTERS ( 'Precio Brent' ), 'Precio Brent'[Brent (USD/bbl)] = b - 5 ) )
+		formatString: #,##0.0
+		displayFolder: 2. Price Intelligence
+		lineageTag: 87bd1e0d-bcf7-451f-b2db-3300e739a6ee
+
+	/// Sensibilidad: cambio de volumen por un escalón de +5 USD de Brent.
+	measure 'Δ Vol por +5 USD (MBPE)' =
+			VAR b = SELECTEDVALUE ( 'Precio Brent'[Brent (USD/bbl)] )
+			RETURN IF ( NOT ISBLANK ( b ), [Vol @ Brent +5] - [Vol 1P Predicho] )
+		formatString: #,##0.0
+		displayFolder: 2. Price Intelligence
+		lineageTag: 37488612-ba6c-4190-ac1a-b69cebf5b88d
+
+	/// Pendiente local del volumen respecto al Brent (diferencia central ±5 USD / 10).
+	measure 'Elasticidad Local (MBPE/USD)' =
+			VAR b = SELECTEDVALUE ( 'Precio Brent'[Brent (USD/bbl)] )
+			RETURN IF ( NOT ISBLANK ( b ), DIVIDE ( [Vol @ Brent +5] - [Vol @ Brent -5], 10 ) )
+		formatString: #,##0.00
+		displayFolder: 2. Price Intelligence
+		lineageTag: 87dab452-65cc-49cb-a22d-20cfc84ef929
+
+	/// Volumen al Brent de referencia (ancla ~68). Debe aproximar el baseline (sanity C5).
+	measure 'Vol @ Brent Ref' =
+			VAR bref = CALCULATE ( MAX ( 'Predicción'[Brent Ref (USD/bbl)] ), ALL ( 'Precio Brent' ) )
+			RETURN CALCULATE ( [Vol 1P Predicho], REMOVEFILTERS ( 'Precio Brent' ), 'Precio Brent'[Brent (USD/bbl)] = ROUND ( bref, 0 ) )
+		formatString: #,##0.0
+		displayFolder: 2. Price Intelligence
+		lineageTag: 558945e2-6356-4ed0-97f7-7992b2cb2d34
+
+	/// Precio Neto Efectivo menos Breakeven Operacional. Usar con un campo y Brent seleccionados.
+	measure 'Colchón vs BK Operacional (USD)' = CALCULATE ( AVERAGE ( 'Predicción'[Precio Neto Efectivo (USD/bbl)] ) - AVERAGE ( 'Predicción'[Breakeven Operacional (USD/bbl)] ) )
+		formatString: $#,##0.00
+		displayFolder: 2. Price Intelligence
+		lineageTag: c2456978-bd46-49ba-9f6f-bfb6324799f3
+
+	/// Precio Neto Efectivo menos Breakeven Financiero. Usar con un campo y Brent seleccionados.
+	measure 'Colchón vs BK Financiero (USD)' = CALCULATE ( AVERAGE ( 'Predicción'[Precio Neto Efectivo (USD/bbl)] ) - AVERAGE ( 'Predicción'[Breakeven Financiero (USD/bbl)] ) )
+		formatString: $#,##0.00
+		displayFolder: 2. Price Intelligence
+		lineageTag: de91332c-4172-4932-b644-b8a47f9cc0d7
+
+	/// Proporción de campos que usan beta de portafolio (sin historia propia).
+	measure '% Campos Fallback M2' = DIVIDE ( CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[M2 Es Fallback] = TRUE () ) ), [# Campos] )
+		formatString: 0.0%
+		displayFolder: 3. Confiabilidad
+		lineageTag: 711806d3-7c69-419d-9862-b7b63b2c9a6a
+
+	measure '# Campos Confianza ALTA' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Nivel Confianza] = "ALTA" ) )
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 95eb4fcd-16a7-401a-88e8-8aa27bf04d96
+
+	measure '# Campos Confianza MEDIA' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Nivel Confianza] = "MEDIA" ) )
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: eb3f7ae9-6d84-493a-b150-cf734fec9935
+
+	measure '# Campos Confianza BAJA' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Nivel Confianza] = "BAJA" ) )
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: db5cd1a8-cb8b-4783-b0fd-2defd7e1fd10
+
+	measure '# Campos Solo Sintético' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Nivel Confianza] = "SOLO_SINTETICO" ) )
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: b09a3a62-b16b-426a-8f72-fb0efd64cbc7
+
+	/// Fracción del volumen predicho en zona de Brent extrapolada.
+	measure '% Vol Extrapolado' = DIVIDE ( CALCULATE ( [Vol 1P Predicho], KEEPFILTERS ( 'Predicción'[Es Extrapolado] = TRUE () ) ), [Vol 1P Predicho] )
+		formatString: 0.0%
+		displayFolder: 3. Confiabilidad
+		lineageTag: 315c62d9-a22d-4149-bcba-81566d937b5a
+
+	column _
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: af4d0a27-1c3f-478a-a91c-0fd0a5584395
+		summarizeBy: none
+		sourceColumn: _
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Fuente = #table({"_"}, {{""}})
+				in
+				    Fuente
+

@@ -11,3 +11,12 @@ __pycache__/
 # IDE / herramientas locales
 .cursor/
 .claude/
+
+# Power BI PBIP — solo versionar definiciones (TMDL + report), no cachés locales
+Tablero/**/.pbi/cache.abf
+Tablero/**/.pbi/localSettings.json
+Tablero/**/.pbi/editorSettings.json
+
+# Respaldos y logs de recuperación
+Tablero_backup_*/
+pipeline_run.log

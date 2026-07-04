@@ -1,0 +1,153 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "3bb06bb63bc065e97e43",
+  "position": {
+    "x": 344,
+    "y": 728,
+    "z": 14000,
+    "height": 320,
+    "width": 1544,
+    "tabOrder": 14000
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Precio Brent"
+                    }
+                  },
+                  "Property": "Brent (USD/bbl)"
+                }
+              },
+              "queryRef": "Precio Brent.Brent (USD/bbl)",
+              "nativeQueryRef": "Brent (USD/bbl)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Vol 1P Predicho"
+                }
+              },
+              "queryRef": "_Medidas.Vol 1P Predicho",
+              "nativeQueryRef": "Vol 1P Predicho"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Predicción"
+                        }
+                      },
+                      "Property": "Precio Neto Efectivo (USD/bbl)"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Avg(Predicción.Precio Neto Efectivo (USD/bbl))",
+              "nativeQueryRef": "Avg of Precio Neto Efectivo (USD/bbl)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Predicción"
+                    }
+                  },
+                  "Property": "Es Viable"
+                }
+              },
+              "queryRef": "Predicción.Es Viable",
+              "nativeQueryRef": "Es Viable"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Predicción"
+                    }
+                  },
+                  "Property": "Es Extrapolado"
+                }
+              },
+              "queryRef": "Predicción.Es Extrapolado",
+              "nativeQueryRef": "Es Extrapolado"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Detalle por punto de Brent'"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1E293B'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

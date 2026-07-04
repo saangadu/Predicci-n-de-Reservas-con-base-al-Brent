@@ -1,0 +1,6 @@
+/// Carpeta raíz del proyecto Predicción. Centraliza la ruta de los CSV/Excel para portabilidad.
+expression RutaBase = "C:\Users\ECOPETROL\Documents\GALLEGO\Prediccion" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: 480852dc-43f0-47d6-a51e-68c137c156aa
+
+	annotation PBI_ResultType = Text
+

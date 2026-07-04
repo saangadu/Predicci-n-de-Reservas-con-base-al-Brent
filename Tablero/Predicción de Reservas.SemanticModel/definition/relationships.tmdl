@@ -1,0 +1,33 @@
+relationship Campo_Prediccion
+	fromColumn: Predicción.'Campo Clave'
+	toColumn: Campo.Campo
+
+relationship Campo_M1
+	fromColumn: 'Diagnóstico M1'.'Campo Clave'
+	toColumn: Campo.Campo
+
+relationship Campo_M2
+	fromColumn: 'Diagnóstico M2'.'Campo Clave'
+	toColumn: Campo.Campo
+
+relationship Brent_Prediccion
+	fromColumn: Predicción.'Brent Clave (USD/bbl)'
+	toColumn: 'Precio Brent'.'Brent (USD/bbl)'
+
+relationship Brent_M2
+	fromColumn: 'Diagnóstico M2'.'Brent Clave (USD/bbl)'
+	toColumn: 'Precio Brent'.'Brent (USD/bbl)'
+
+relationship Motor_Prediccion
+	fromColumn: Predicción.'Motor Clave'
+	toColumn: Motor.Motor
+
+relationship Motor_M1
+	fromColumn: 'Diagnóstico M1'.'Motor Clave'
+	toColumn: Motor.Motor
+
+relationship 1b7f0fcd-44e3-47ce-a683-8e8862d003e1
+	joinOnDateBehavior: datePartOnly
+	fromColumn: Predicción.'Fecha Predicción'
+	toColumn: LocalDateTable_e3e48511-2aa2-4383-8a0b-665cc6c3dbf9.Date
+

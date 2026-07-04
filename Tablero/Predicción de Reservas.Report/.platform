@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "Predicción de Reservas"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "f1dc7c93-194b-453d-b55f-f84d6397a93c"
+  }
+}

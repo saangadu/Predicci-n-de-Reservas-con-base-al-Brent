@@ -1,0 +1,15 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
+  "name": "ReportSection0d5440259d40558ccc42cebc",
+  "displayName": "Resumen Ejecutivo",
+  "displayOption": "FitToPage",
+  "height": 1080,
+  "width": 1920,
+  "visualInteractions": [
+    {
+      "source": "69b06a6bfc895f68fc22",
+      "target": "d9770629ef288e193315",
+      "type": "NoFilter"
+    }
+  ]
+}

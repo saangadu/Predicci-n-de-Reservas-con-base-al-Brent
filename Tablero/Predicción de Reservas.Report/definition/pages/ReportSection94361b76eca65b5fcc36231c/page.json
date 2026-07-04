@@ -1,0 +1,15 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/page/2.1.0/schema.json",
+  "name": "ReportSection94361b76eca65b5fcc36231c",
+  "displayName": "Explorador de Campo",
+  "displayOption": "FitToPage",
+  "height": 1080,
+  "width": 1920,
+  "visualInteractions": [
+    {
+      "source": "659d540d3a7f4eeffa13",
+      "target": "1a6868d1c18d5c2883ef",
+      "type": "NoFilter"
+    }
+  ]
+}
