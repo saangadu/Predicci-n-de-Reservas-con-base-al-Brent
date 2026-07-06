@@ -171,6 +171,67 @@ def loo_cv_solo_reales(df_campo: pd.DataFrame) -> tuple:
     return r2i, maei, rmsei, mei, r2s, maes, rmses, mes, mae_naive
 
 
+def loyo_cv_por_vigencia(df_campo: pd.DataFrame) -> tuple:
+    """
+    LOYO-CV (leave-one-YEAR-out, auditoria NORTE 2026-07-02): folds por AÑO de
+    vigencia del Consolidado, no por punto.
+
+    POR QUE: el LOO clasico deja 1 punto fuera y lo predicen los otros 3 del MISMO
+    año (delta plano intra-vigencia) → subestima el error de generalizacion 4-9x en
+    el gate dorado (CASTILLA: MAE_LOO=6.1 vs MAE_LOYO=45.8). El LOYO hace la pregunta
+    del negocio: "¿puedes predecir el año que no viste?" — que es exactamente predecir
+    el siguiente quarter. Es la metrica honesta del confound de vigencia (§3ter del
+    informe): donde LOYO >> LOO, la curva aprendio el salto entre decks anuales, no
+    una respuesta al precio.
+
+    Train = sinteticos (pesos por nivel) + reales de los OTROS años; test = reales del
+    año excluido. Ingenuo del fold: media de los deltas reales de train (mismo ingenuo
+    que LOO, evaluado cross-año). SKILL_LOYO = 1 − MAE_LOYO/MAE_NAIVE_LOYO.
+
+    Retorna (mae_loyo_iso, mae_naive_loyo, skill_loyo_iso, n_vigencias).
+    NaN si el campo no tiene ≥2 años con puntos reales.
+    """
+    df_real = df_campo[~df_campo["ES_SINTETICO"]].reset_index(drop=True)
+    df_sint = df_campo[df_campo["ES_SINTETICO"]].reset_index(drop=True)
+
+    n_real = len(df_real)
+    anios = df_real["VIGENCIA"].astype(str).str.slice(0, 4)
+    anios_unicos = sorted(anios.unique())
+    if n_real < 2 or len(anios_unicos) < 2:
+        return (np.nan, np.nan, np.nan, len(anios_unicos))
+
+    x_sint = df_sint[FEATURE].values if len(df_sint) > 0 else np.empty(0)
+    y_sint = df_sint[TARGET].values  if len(df_sint) > 0 else np.empty(0)
+    w_sint = pesos_sinteticos_tramo(df_sint, n_real)[0] if len(df_sint) > 0 else np.empty(0)
+
+    abs_err_iso, abs_err_naive = [], []
+    for anio in anios_unicos:
+        mask_te = (anios == anio).values
+        mask_tr = ~mask_te
+        if mask_tr.sum() < 2:
+            continue
+        x_tr_real = df_real.loc[mask_tr, FEATURE].values
+        y_tr_real = df_real.loc[mask_tr, TARGET].values
+
+        x_train = np.concatenate([x_sint, x_tr_real]) if len(x_sint) > 0 else x_tr_real
+        y_train = np.concatenate([y_sint, y_tr_real]) if len(y_sint) > 0 else y_tr_real
+        w_train = np.concatenate([w_sint, np.ones(mask_tr.sum())]) if len(w_sint) > 0 \
+            else np.ones(mask_tr.sum())
+
+        x_test = df_real.loc[mask_te, FEATURE].values
+        y_test = df_real.loc[mask_te, TARGET].values
+        y_hat = MotorIsotonico().fit(x_train, y_train, sample_weight=w_train).predict(x_test)
+        abs_err_iso.extend(np.abs(np.asarray(y_hat) - y_test).tolist())
+        abs_err_naive.extend(np.abs(float(np.mean(y_tr_real)) - y_test).tolist())
+
+    if not abs_err_iso:
+        return (np.nan, np.nan, np.nan, len(anios_unicos))
+    mae_loyo = float(np.mean(abs_err_iso))
+    mae_naive_loyo = float(np.mean(abs_err_naive))
+    skill_loyo = 1 - mae_loyo / mae_naive_loyo if mae_naive_loyo > 0.01 else np.nan
+    return mae_loyo, mae_naive_loyo, skill_loyo, len(anios_unicos)
+
+
 def entrenar_final_campo(df_campo: pd.DataFrame) -> tuple:
     """Entrena los modelos finales con TODOS los datos (reales + sinteticos), en Precio
     Neto. Pesos sinteticos balanceados por nivel; los reales pesan 1.0.
@@ -468,7 +529,11 @@ if __name__ == "__main__":
                      .last().to_dict())
 
     # ── Re-anclaje (2026-06-12): p_ref por campo = M2(BRENT_REF) ─────────────
-    # BRENT_REF = Brent del ultimo quarter conocido del Consolidado (punto actual).
+    # BRENT_REF = Brent del ultimo quarter CON RESERVAS del Consolidado (2026-07-06).
+    # El loop rodante recibe el PRECIO de un quarter antes que sus RESERVAS: un
+    # quarter con precio pero sin reservas (TARGET_NULO) es el objetivo a predecir,
+    # NO el punto de anclaje. El ancla Vol(BRENT_REF)=baseline solo es coherente si
+    # precio y reservas certificadas son del MISMO quarter (el ultimo con reservas).
     ruta_m2 = STAGING / "correlacion_brent.csv"
     if not ruta_m2.exists():
         raise FileNotFoundError(
@@ -476,10 +541,11 @@ if __name__ == "__main__":
             "de 03_modelo.py (orden del pipeline desde 2026-06-12).")
     coef_m2 = pd.read_csv(ruta_m2).set_index("CAMPO")[["ALPHA", "BETA"]].to_dict("index")
     df_q = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"])
-              & df["BRENT_FLAT_USD_BBL"].notna() & df["VIGENCIA"].notna()]
+              & df["BRENT_FLAT_USD_BBL"].notna() & df["VIGENCIA"].notna()
+              & df["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna()]
     if df_q.empty:
-        raise ValueError("Sin quarters Consolidado en el tablon: no se puede fijar BRENT_REF.")
-    # VIGENCIA "YYYY_Qn" ordena lexicograficamente; el ultimo quarter es el punto actual
+        raise ValueError("Sin quarters Consolidado con reservas en el tablon: no se puede fijar BRENT_REF.")
+    # VIGENCIA "YYYY_Qn" ordena lexicograficamente; el ultimo quarter CON RESERVAS es el ancla
     BRENT_REF = float(df_q.sort_values("VIGENCIA")["BRENT_FLAT_USD_BBL"].iloc[-1])
     VIGENCIA_REF = str(df_q["VIGENCIA"].max())
     p_ref_campo = {c: v["ALPHA"] + v["BETA"] * BRENT_REF for c, v in coef_m2.items()}
@@ -487,6 +553,7 @@ if __name__ == "__main__":
           f"p_ref por campo via Modelo 2.\n")
 
     registros = []
+    registros_sanity = []   # persistencia G1 (NORTE): CAMPO x CHECK x PASS
     campos = sorted(df["CAMPO"].unique())
     print(f"Campos: {len(campos)}\n")
 
@@ -522,6 +589,8 @@ if __name__ == "__main__":
                   f"Entrenando solo en {n_sint} sinteticos. LOO-CV: N/A.")
             r2i = maei = rmsei = mei = r2s = maes = rmses = mes = mae_naive = np.nan
             skill_i = skill_s = np.nan
+            mae_loyo = mae_naive_loyo = skill_loyo = np.nan
+            n_vig_loyo = 0
         else:
             print(f"\n  [LOO-CV] Solo sobre {n_real} puntos reales (sinteticos en train)...")
             r2i, maei, rmsei, mei, r2s, maes, rmses, mes, mae_naive = \
@@ -532,6 +601,15 @@ if __name__ == "__main__":
                   f"SKILL={skill_i:.3f}  [REFERENCIAL]")
             print(f"  SUAVE (valid.):  R2_LOO={r2s:.3f}  MAE={maes:.2f}  RMSE={rmses:.2f}  "
                   f"SKILL={skill_s:.3f}  [REFERENCIAL]")
+            # LOYO (leave-one-year-out): generalizacion cross-vigencia — la metrica
+            # honesta del confound (§3ter). LOYO >> LOO = la curva aprendio el salto
+            # entre años, no el precio.
+            mae_loyo, mae_naive_loyo, skill_loyo, n_vig_loyo = \
+                loyo_cv_por_vigencia(df_campo)
+            if pd.notna(mae_loyo):
+                infl = mae_loyo / maei if pd.notna(maei) and maei > 0.01 else np.nan
+                print(f"  ISO LOYO ({n_vig_loyo} años): MAE={mae_loyo:.2f} "
+                      f"(LOO x{infl:.1f})  SKILL_LOYO={skill_loyo:.3f}  [REFERENCIAL]")
 
         print(f"\n  Entrenando modelos finales (reales + sinteticos)...")
         iso_m, suave_m = entrenar_final_campo(df_campo)
@@ -566,9 +644,13 @@ if __name__ == "__main__":
             pneto_reales = df_campo.loc[~df_campo["ES_SINTETICO"], FEATURE].values
             print(f"\n  Sanity checks (BK_fin={bk_fin:.1f}, BK_pdp={bk_pdp:.1f}, "
                   f"baseline={baseline_latest:.1f}, PDP={baseline_pdp:.1f}):")
-            sanity_check(campo, iso_m, suave_m, bk_fin, bk_pdp,
-                         vol_max_delta, baseline_latest, baseline_pdp,
-                         df_sint=df_sint_campo, pneto_reales=pneto_reales)
+            checks = sanity_check(campo, iso_m, suave_m, bk_fin, bk_pdp,
+                                  vol_max_delta, baseline_latest, baseline_pdp,
+                                  df_sint=df_sint_campo, pneto_reales=pneto_reales)
+            # Persistencia G1 (NORTE, deuda cerrada 2026-07-02): sin este artefacto
+            # test_norte::test_g1 hacia skip y los gates fisicos no bloqueaban en CI
+            for chk, ok in checks.items():
+                registros_sanity.append({"CAMPO": campo, "CHECK": chk, "PASS": bool(ok)})
 
         # C5/C6 — invariantes del re-anclaje (sobre la reconstruccion anclada)
         if p_ref is not None and pd.notna(baseline_latest):
@@ -646,6 +728,13 @@ if __name__ == "__main__":
                                   if pd.notna(maes) and baseline_latest > 0 else None,
             "SKILL_SUAVE":        round(skill_s, 4) if pd.notna(skill_s) else None,
             "MAE_NAIVE":          round(mae_naive, 2) if pd.notna(mae_naive) else None,
+            # LOYO (leave-one-year-out, auditoria NORTE 2026-07-02): error de
+            # generalizacion CROSS-VIGENCIA — la pregunta real del negocio (predecir
+            # el año no visto). LOYO >> LOO delata el confound de vigencia (§3ter).
+            "MAE_LOYO_ISO":       round(mae_loyo, 2) if pd.notna(mae_loyo) else None,
+            "MAE_NAIVE_LOYO":     round(mae_naive_loyo, 2) if pd.notna(mae_naive_loyo) else None,
+            "SKILL_LOYO_ISO":     round(skill_loyo, 4) if pd.notna(skill_loyo) else None,
+            "N_VIGENCIAS_LOYO":   n_vig_loyo,
             # Precio Neto donde delta=0 (equivale al deck del baseline)
             "PNETO_DELTA0_ISO":   round(pn0_i, 1) if pd.notna(pn0_i) else None,
             "PNETO_DELTA0_SUAVE": round(pn0_s, 1) if pd.notna(pn0_s) else None,
@@ -662,6 +751,13 @@ if __name__ == "__main__":
     df_met.to_csv(STAGING / "metricas.csv", index=False, encoding="utf-8-sig")
     df_met.to_csv(RESULTADOS / "metricas.csv", index=False, encoding="utf-8-sig")
     print(f"\n  Matriz de metricas: {RESULTADOS / 'metricas.csv'}")
+
+    # ── Sanity checks persistidos (G1 NORTE) ──────────────────────────────────
+    df_sanity = pd.DataFrame(registros_sanity)
+    df_sanity.to_csv(STAGING / "sanity_checks.csv", index=False, encoding="utf-8-sig")
+    n_fail = int((~df_sanity["PASS"]).sum()) if len(df_sanity) else 0
+    print(f"  Sanity checks G1: {STAGING / 'sanity_checks.csv'} "
+          f"({len(df_sanity)} checks, {n_fail} FAIL)")
     print(f"\n{'=' * 50}")
     print("Metricas LOO-CV sobre puntos REALES (REFERENCIALES — N pequeño):")
     print(df_met.to_string(index=False))

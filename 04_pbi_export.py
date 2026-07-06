@@ -73,6 +73,27 @@ CONFIANZA_MAE_REL_OUTLIER = 0.05
 # Exencion: campos "planos" (MAE_NAIVE < CONFIANZA_MAE_ABS_ALTA) — alli la media
 # ingenua es imbatible por construccion y SKILL<=0 no indica un mal modelo.
 CONFIANZA_SKILL_MIN = 0.0
+# Materialidad para etiquetas de riesgo (2026-07-01): en campos grandes una
+# etiqueta ALTA no debe leerse como "confio en el +X%" si el modelo NO extrae
+# senal de precio (plano exento del gate de skill) o si M2 es fragil (sin
+# historia / n<5 / R2_LOO<0). Se conserva el nivel pero se marca el motivo.
+CONFIANZA_BASELINE_MATERIAL = 50.0
+# Confound de vigencia (2026-07-02, informe §3ter): en varios campos el "escalon
+# de precio" que aprende la isotonica es en realidad la diferencia entre los
+# pronosticos de dos AÑOS de Consolidado distintos (2024 delta≈+15, 2025 ≈-30 en
+# CASTILLA) cuyas bandas de precio no se solapan. Elasticidad intra-vigencia ≈ 0
+# → la sensibilidad al precio esta NO IDENTIFICADA en banda. Criterio de flag:
+#   - η² ≥ 0.8: el año de vigencia explica ≥80% de la varianza del delta
+#   - solape < $2: las bandas de precio neto de los años casi no se tocan
+#     (si solapan ampliamente, el efecto precio SI es separable del año)
+#   - salto ≥ 5% del baseline: el escalon inter-año es material
+CONFOUND_ETA2_MIN       = 0.8
+CONFOUND_SOLAPA_MAX_USD = 2.0
+CONFOUND_SALTO_REL_MIN  = 0.05
+# Materialidad propia del confound (≥20 MBPE, mas estricta que los 50 de las
+# otras etiquetas): el salto espurio escala con el baseline y ya es relevante
+# para CAPEX en campos medianos (LA CIRA 44, CUSIANA 32, YARIGUI 32).
+CONFOUND_BASELINE_MATERIAL = 20.0
 
 HISTORICO_DIR = RESULTADOS / "historico_predicciones"
 
@@ -93,14 +114,96 @@ def siguiente_quarter(q: str) -> str:
 
 
 def derivar_vigencias(df: pd.DataFrame) -> tuple[str, str]:
-    """Maximo quarter de los escenarios CONSOLIDADO_* del tablon -> (base, objetivo)."""
-    qs = [s.replace("CONSOLIDADO_", "")
-          for s in df["ESCENARIO"].dropna().unique()
-          if str(s).startswith("CONSOLIDADO_")]
+    """Ultimo quarter CONSOLIDADO_* CON RESERVAS -> (base, objetivo).
+
+    El loop rodante avanza cuando llegan las RESERVAS, no cuando llega el precio:
+    siempre recibimos el precio de un quarter un trimestre antes que sus reservas.
+    Un quarter con precio pero sin reservas (ALERTA=TARGET_NULO) es el OBJETIVO a
+    predecir, no la base. Por eso se filtra a quarters con VOLUMEN_1P_SENSIBILIDAD.
+    """
+    con = df[df["ESCENARIO"].astype(str).str.startswith("CONSOLIDADO_")
+             & df["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna()]
+    qs = [s.replace("CONSOLIDADO_", "") for s in con["ESCENARIO"].dropna().unique()]
     if not qs:
         return "DESCONOCIDA", "DESCONOCIDA"
     vigencia_base = sorted(qs)[-1]
     return vigencia_base, siguiente_quarter(vigencia_base)
+
+
+def construir_puntos_reales(df, filas_m1, filas_m2, baselines, anclaje):
+    """Une curvas del modelo + puntos reales + ancla para replicar en Power BI los
+    dos plots de datos/staging (espacio delta y volumen absoluto) y el plot M2.
+
+    Reales coloreados por AÑO (serie 'Real {año}' → una serie/color por vigencia).
+    No incluye sinteticos ni breakeven: solo modelo + reales + ancla actual.
+    - M1: reales = CONSOLIDADO (~ES_SINTETICO & ~ES_BASELINE & DELTA_SENS notna).
+          Volumen real graficado = baseline_latest + DELTA_SENS (mismo criterio que el
+          panel derecho de 03_modelo: delta anclado al baseline vigente).
+    - M2: reales = HIST cierres anuales (ES_BASELINE & BRENT_FLAT/PRECIO_NETO notna),
+          mismos puntos con que se ajusta la recta Theil-Sen (03b).
+    """
+    # ── M1: curva iso/suave + reales por año + ancla ─────────────────────────
+    reg_m1 = []
+    for r in filas_m1:
+        reg_m1.append({
+            "CAMPO": r["CAMPO"],
+            "SERIE": "Isotónica" if r["MOTOR"] == "Isotonica" else "Suave",
+            "AÑO": None,
+            "PRECIO_NETO_USD_BBL": r["PRECIO_ACEITE_USD_BBL"],
+            "DELTA_MBPE": r["DELTA_ANCLADO_MBPE"],
+            "VOLUMEN_MBPE": r["VOLUMEN_1P_PREDICHO_MBPE"],
+        })
+    reales = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"])
+                & df["DELTA_SENS_MBPE"].notna() & df["PRECIO_NETO_USD_BBL"].notna()]
+    for _, r in reales.iterrows():
+        base = baselines.get(r["CAMPO"], np.nan)
+        if pd.isna(base):
+            continue
+        reg_m1.append({
+            "CAMPO": r["CAMPO"],
+            "SERIE": f"Real {int(r['AÑO'])}",
+            "AÑO": int(r["AÑO"]),
+            "PRECIO_NETO_USD_BBL": round(float(r["PRECIO_NETO_USD_BBL"]), 2),
+            "DELTA_MBPE": round(float(r["DELTA_SENS_MBPE"]), 2),
+            "VOLUMEN_MBPE": round(float(base + r["DELTA_SENS_MBPE"]), 2),
+        })
+    for campo, base in baselines.items():
+        p_ref = anclaje.get(campo, {}).get("P_REF_USD_BBL", np.nan)
+        if pd.isna(p_ref) or pd.isna(base):
+            continue
+        reg_m1.append({
+            "CAMPO": campo, "SERIE": "Ancla", "AÑO": None,
+            "PRECIO_NETO_USD_BBL": round(float(p_ref), 2),
+            "DELTA_MBPE": 0.0, "VOLUMEN_MBPE": round(float(base), 2),
+        })
+    df_m1 = pd.DataFrame(reg_m1)
+
+    # ── M2: recta (grilla) + reales HIST por año ─────────────────────────────
+    reg_m2 = []
+    for r in filas_m2:
+        reg_m2.append({
+            "CAMPO": r["CAMPO"], "SERIE": "Recta", "AÑO": None,
+            "BRENT_USD_BBL": r["BRENT_USD_BBL"],
+            "PRECIO_NETO_USD_BBL": r["PRECIO_ACEITE_USD_BBL"],
+        })
+    hist = df[(~df["ES_SINTETICO"]) & df["ES_BASELINE"]
+              & df["BRENT_FLAT_USD_BBL"].notna() & df["PRECIO_NETO_USD_BBL"].notna()]
+    for _, r in hist.iterrows():
+        reg_m2.append({
+            "CAMPO": r["CAMPO"], "SERIE": f"Real {int(r['AÑO'])}", "AÑO": int(r["AÑO"]),
+            "BRENT_USD_BBL": round(float(r["BRENT_FLAT_USD_BBL"]), 2),
+            "PRECIO_NETO_USD_BBL": round(float(r["PRECIO_NETO_USD_BBL"]), 2),
+        })
+    df_m2 = pd.DataFrame(reg_m2)
+
+    # IDX: granularidad por (campo, serie) para el scatter de Power BI (evita
+    # que agregue puntos con el mismo precio; cada punto es una fila unica)
+    # AÑO como entero nullable → escribe "2024"/"" (no "2024.0") para tipar limpio en M
+    for _d in (df_m1, df_m2):
+        if not _d.empty:
+            _d.insert(0, "IDX", _d.groupby(["CAMPO", "SERIE"]).cumcount())
+            _d["AÑO"] = _d["AÑO"].astype("Int64")
+    return df_m1, df_m2
 
 
 def cargar_correlacion() -> dict:
@@ -110,6 +213,74 @@ def cargar_correlacion() -> dict:
         raise FileNotFoundError("correlacion_brent.csv no existe: correr 03b_correlacion_brent.py")
     df = pd.read_csv(ruta)
     return {r["CAMPO"]: r.to_dict() for _, r in df.iterrows()}
+
+
+# Umbrales de fragilidad M2 (informe 2026-07-01 WS2.2): un campo material cuya
+# recta Brent->Aceite se apoya en pocos puntos, sin R2_LOO positivo, o en el
+# fallback de portafolio, no sostiene con solidez el salto de precio que
+# arrastra a M1. Se marca (no se descarta): la cadena sigue siendo la mejor
+# aproximacion disponible, pero la confianza debe reflejarlo.
+M2_FRAGIL_N_MIN = 5
+
+
+def es_m2_fragil(coef: dict) -> bool:
+    """True si el Modelo 2 del campo es fragil: fallback de portafolio,
+    menos de M2_FRAGIL_N_MIN puntos HIST, o R2_LOO no positivo (out-of-sample)."""
+    if coef is None:
+        return True
+    if bool(coef.get("ES_FALLBACK", False)):
+        return True
+    n_puntos = coef.get("N_PUNTOS")
+    if pd.isna(n_puntos) or n_puntos < M2_FRAGIL_N_MIN:
+        return True
+    r2_loo = coef.get("R2_LOO")
+    if pd.notna(r2_loo) and r2_loo < 0:
+        return True
+    return False
+
+
+def calcular_confound_vigencia(df: pd.DataFrame, baselines: dict) -> dict:
+    """Detecta por campo el confound de vigencia (informe 2026-07-02 §3ter):
+    el año de Consolidado explica el delta (η² alto), las bandas de precio de
+    los años no se solapan, y el salto inter-año es material vs el baseline.
+    En esos campos la sensibilidad al precio esta NO IDENTIFICADA en banda:
+    el "escalon" de M1 puede ser diferencia de decks de pronostico, no precio.
+
+    Retorna {campo: {"FLAG", "ETA2", "SOLAPA_USD", "SALTO_REL"}} para los campos
+    con ≥4 puntos reales y ≥2 años de vigencia; el resto no aparece (sin flag)."""
+    real = df[(~df["ES_BASELINE"]) & (~df["ES_SINTETICO"])
+              & df["DELTA_SENS_MBPE"].notna() & df["PRECIO_NETO_USD_BBL"].notna()].copy()
+    real["_ANIO_VIG"] = real["VIGENCIA"].astype(str).str.slice(0, 4)
+
+    out = {}
+    for campo, g in real.groupby("CAMPO"):
+        if len(g) < 4 or g["_ANIO_VIG"].nunique() < 2:
+            continue
+        # η²: fraccion de la varianza del delta explicada por el año de vigencia
+        gm = g["DELTA_SENS_MBPE"].mean()
+        ss_tot = ((g["DELTA_SENS_MBPE"] - gm) ** 2).sum()
+        if ss_tot <= 0:
+            continue
+        ss_between = sum(len(sub) * (sub["DELTA_SENS_MBPE"].mean() - gm) ** 2
+                         for _, sub in g.groupby("_ANIO_VIG"))
+        eta2 = ss_between / ss_tot
+        # Solape de bandas de precio entre años (>0 = solapan; <0 = separadas)
+        rangos = {a: (sub["PRECIO_NETO_USD_BBL"].min(), sub["PRECIO_NETO_USD_BBL"].max())
+                  for a, sub in g.groupby("_ANIO_VIG")}
+        solapa = min(r[1] for r in rangos.values()) - max(r[0] for r in rangos.values())
+        # Salto de medias inter-año relativo al baseline del campo
+        medias = [sub["DELTA_SENS_MBPE"].mean() for _, sub in g.groupby("_ANIO_VIG")]
+        salto = max(medias) - min(medias)
+        base = baselines.get(campo, np.nan)
+        salto_rel = salto / base if pd.notna(base) and base > 0 else np.nan
+        flag = bool(eta2 >= CONFOUND_ETA2_MIN
+                    and solapa < CONFOUND_SOLAPA_MAX_USD
+                    and pd.notna(salto_rel) and salto_rel >= CONFOUND_SALTO_REL_MIN)
+        out[campo] = {"FLAG": flag, "ETA2": round(float(eta2), 3),
+                      "SOLAPA_USD": round(float(solapa), 2),
+                      "SALTO_REL": round(float(salto_rel), 3) if pd.notna(salto_rel) else None,
+                      "N_REALES": len(g)}
+    return out
 
 
 def cargar_anclas(df: pd.DataFrame) -> dict:
@@ -162,12 +333,25 @@ def banda_historica_brent(df: pd.DataFrame) -> dict:
 
 def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
                          mae_abs=999.0, outlier_lloo=False,
-                         skill=np.nan, mae_naive=np.nan) -> tuple[str, str]:
+                         skill=np.nan, mae_naive=np.nan,
+                         m2_fragil=False, sens_no_ident=False) -> tuple[str, str]:
     """Clasifica la confianza usando criterios funcionales del piloto (MAESTRO §7.4).
 
     Gate de skill (2026-06-11): ALTA exige SKILL_ISO > 0 o campo "plano"
     (MAE_NAIVE pequeño — la media ingenua es imbatible por construccion alli).
-    SKILL NaN (sin reales suficientes o naive≈0) no penaliza."""
+    SKILL NaN (sin reales suficientes o naive≈0) no penaliza.
+
+    Revision hallazgos 2026-07-01: la exencion de campo plano deja pasar a ALTA
+    campos grandes SIN senal de precio (ej. CAÑO SUR ESTE: MAE_NAIVE=1.18<2.0,
+    skill=-0.44, baseline=140 MBPE). El nivel no baja (el error SIGUE siendo
+    bajo) pero el motivo se marca "insensible-al-precio" para que el lector no
+    confunda "preciso" con "sensible al Brent" en un campo material.
+    m2_fragil (M2 sin historia propia / n<5 / R2_LOO<0) SI degrada el techo a
+    MEDIA en campos materiales: la cadena completa depende de una recta fragil.
+    sens_no_ident (confound de vigencia §3ter, 2026-07-02) tambien degrada el
+    techo a MEDIA en campos materiales: el escalon de M1 puede ser diferencia
+    entre decks de años distintos, no efecto precio — la pendiente que lee CAPEX
+    no esta identificada aunque el error LOO luzca bajo."""
     if mae_abs < CONFIANZA_MAE_ABS_ALTA:
         mae_rel_eff = min(mae_rel, CONFIANZA_MAE_REL_ALTA * 0.99)
     elif mae_abs < CONFIANZA_MAE_ABS_MEDIA:
@@ -202,6 +386,34 @@ def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
     # con variacion material de deltas (naive grande). Campos planos exentos.
     sin_skill = (pd.notna(skill) and skill <= CONFIANZA_SKILL_MIN
                  and pd.notna(mae_naive) and mae_naive >= CONFIANZA_MAE_ABS_ALTA)
+
+    # Campo material que pasa el gate SOLO por la exencion de "plano" (skill<=0
+    # pero mae_naive chico): el error bajo no implica que el Brent explique el
+    # volumen. Se marca en el motivo, no se baja el nivel (informe 2026-07-01 WS2.1).
+    insensible_material = (pd.notna(skill) and skill <= CONFIANZA_SKILL_MIN
+                            and not sin_skill and baseline >= CONFIANZA_BASELINE_MATERIAL)
+    if insensible_material:
+        motivo = f"insensible-al-precio | {motivo}"
+
+    # Confound de vigencia (informe 2026-07-02 §3ter) en campo material: el
+    # escalon de precio de M1 puede ser diferencia entre decks de pronostico de
+    # años distintos (sensibilidad NO identificada en banda) -> techo MEDIA.
+    # El error LOO luce bajo (los folds caen dentro de cada nube anual) pero la
+    # PENDIENTE de la curva no es confiable — que es justo lo que lee CAPEX.
+    if sens_no_ident and baseline >= CONFOUND_BASELINE_MATERIAL:
+        motivo = f"sensibilidad-no-identificada | {motivo}"
+        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
+            return "MEDIA", motivo
+        return "BAJA", motivo
+
+    # M2 fragil (sin historia propia / n<5 puntos / R2_LOO<0) en campo material:
+    # la cadena completa depende de una recta poco confiable -> techo MEDIA
+    # aunque M1 luzca preciso (informe 2026-07-01 WS2.3).
+    if m2_fragil and baseline >= CONFIANZA_BASELINE_MATERIAL:
+        motivo = f"M2-fragil | {motivo}"
+        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
+            return "MEDIA", motivo
+        return "BAJA", motivo
 
     if (n_real >= CONFIANZA_N_REAL_MIN and mae_rel_eff < CONFIANZA_MAE_REL_ALTA
             and divergencia < CONFIANZA_DIV_ALTA and not sin_skill):
@@ -312,6 +524,7 @@ if __name__ == "__main__":
     ponderados  = cargar_ponderados(df)
     baselines   = cargar_baselines(df)
     bandas      = banda_historica_brent(df)
+    confound    = calcular_confound_vigencia(df, baselines)
 
     # Re-anclaje (2026-06-12): p_ref/delta_ref por campo x motor desde metricas.csv (03)
     ruta_met = STAGING / "metricas.csv"
@@ -383,6 +596,9 @@ if __name__ == "__main__":
                       "Suave":     anc.get("DELTA_REF_SUAVE", 0.0) or 0.0}
         m2_metodo = coef.get("METODO", "")
         m2_fallback = bool(coef.get("ES_FALLBACK", False))
+        m2_fragil = es_m2_fragil(coef)
+        conf_campo = confound.get(campo, {})
+        sens_no_ident = bool(conf_campo.get("FLAG", False))
         _bk_dura = bk_pdp if pd.notna(bk_pdp) else None
 
         # ── Matriz M2 pura: Brent -> Precio Aceite ────────────────────────────
@@ -401,6 +617,7 @@ if __name__ == "__main__":
                 "R2_LOO":                 coef.get("R2_LOO"),
                 "MAE_LOO":                coef.get("MAE_LOO"),
                 "ALERTA":                 coef.get("ALERTA", ""),
+                "M2_FRAGIL":              m2_fragil,
             })
 
         # ── Matriz M1 pura: Precio Aceite -> Delta anclado / Volumen ─────────
@@ -462,6 +679,13 @@ if __name__ == "__main__":
                     # Tag M2: campos sin relacion propia Aceite~Brent (k de portafolio)
                     "M2_METODO":                       m2_metodo,
                     "M2_ES_FALLBACK":                  m2_fallback,
+                    "M2_N_PUNTOS":                     coef.get("N_PUNTOS"),
+                    "M2_R2_LOO":                       coef.get("R2_LOO"),
+                    "M2_FRAGIL":                       m2_fragil,
+                    # Confound de vigencia (§3ter): la pendiente de precio de M1
+                    # no es separable del cambio de año de Consolidado
+                    "SENSIBILIDAD_NO_IDENTIFICADA":    sens_no_ident,
+                    "CONFOUND_ETA2":                   conf_campo.get("ETA2"),
                     "BREAKEVEN_FINANCIERO_USD_BBL":    round(bk_fin, 2) if pd.notna(bk_fin) else None,
                     "BREAKEVEN_OPERACIONAL_USD_BBL":   round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
                     "BK_REFERENCIA_FIN_USD_BBL":       round(bk_ref_fin, 2) if pd.notna(bk_ref_fin) else None,
@@ -505,6 +729,8 @@ if __name__ == "__main__":
         met = met.merge(div_serie, on="CAMPO", how="left")
         met["DIVERGENCIA_MOTORES_PCT"] = met["DIVERGENCIA_MOTORES_PCT"].fillna(999.0)
 
+        m2_fragil_map = {campo: es_m2_fragil(coef) for campo, coef in correlacion.items()}
+
         rows_conf = []
         for _, r in met.iterrows():
             nivel, motivo = clasificar_confianza(
@@ -515,7 +741,9 @@ if __name__ == "__main__":
                 mae_abs=float(r["MAE_LOO_ISO"]) if pd.notna(r["MAE_LOO_ISO"]) else 999.0,
                 outlier_lloo=bool(r["ALERTA_LOO_OUTLIER_ISO"]),
                 skill=float(r["SKILL_ISO"]) if pd.notna(r["SKILL_ISO"]) else np.nan,
-                mae_naive=float(r["MAE_NAIVE"]) if pd.notna(r["MAE_NAIVE"]) else np.nan)
+                mae_naive=float(r["MAE_NAIVE"]) if pd.notna(r["MAE_NAIVE"]) else np.nan,
+                m2_fragil=m2_fragil_map.get(r["CAMPO"], False),
+                sens_no_ident=bool(confound.get(r["CAMPO"], {}).get("FLAG", False)))
             rows_conf.append({"CAMPO": r["CAMPO"], "N_REAL_DELTA": int(r["N_REAL_DELTA"]),
                               "MAE_REL_LOO": round(float(r["MAE_REL_LOO"]), 4),
                               "DIVERGENCIA_MOTORES_PCT": round(float(r["DIVERGENCIA_MOTORES_PCT"]), 4),
@@ -552,6 +780,15 @@ if __name__ == "__main__":
     pd.DataFrame(filas_m2).to_csv(ruta_m2_csv, index=False, encoding="utf-8-sig")
     print(f"  Matriz Modelo 1 (Aceite->Volumen, puro): {ruta_m1}")
     print(f"  Matriz Modelo 2 (Brent->Aceite, puro):   {ruta_m2_csv}")
+
+    # Puntos para replicar los plots de staging en Power BI (modelo + reales + ancla)
+    df_pm1, df_pm2 = construir_puntos_reales(df, filas_m1, filas_m2, baselines, anclaje)
+    ruta_pm1 = RESULTADOS / "output_puntos_m1.csv"
+    ruta_pm2 = RESULTADOS / "output_puntos_m2.csv"
+    df_pm1.to_csv(ruta_pm1, index=False, encoding="utf-8-sig")
+    df_pm2.to_csv(ruta_pm2, index=False, encoding="utf-8-sig")
+    print(f"  Puntos M1 (curva+reales+ancla): {ruta_pm1} ({len(df_pm1)} filas)")
+    print(f"  Puntos M2 (recta+reales HIST):  {ruta_pm2} ({len(df_pm2)} filas)")
 
     HISTORICO_DIR.mkdir(parents=True, exist_ok=True)
     nombre_snapshot = f"prediccion_{q_objetivo}_generada_{fecha_prediccion}.csv"
@@ -632,6 +869,18 @@ if __name__ == "__main__":
         ["EN_PREDICCION", "BASELINE_1P_MBPE"], ascending=[True, False])
     ruta_cob = RESULTADOS / "cobertura_portafolio.csv"
     df_cob.to_csv(ruta_cob, index=False, encoding="utf-8-sig")
+
+    # Rollup de cobertura (informe 2026-07-01 WS2.4): MBPE total y conteo por
+    # motivo de ausencia, para declarar explicitamente ante finanzas cuanto
+    # 1P del portafolio (ej. filiales sin_consolidado) queda fuera del piloto.
+    df_resumen = (df_cob.groupby("MOTIVO_AUSENCIA")
+                  .agg(N_CAMPOS=("CAMPO", "nunique"),
+                       BASELINE_1P_MBPE=("BASELINE_1P_MBPE", "sum"))
+                  .reset_index()
+                  .sort_values("BASELINE_1P_MBPE", ascending=False))
+    df_resumen["BASELINE_1P_MBPE"] = df_resumen["BASELINE_1P_MBPE"].round(2)
+    ruta_resumen = RESULTADOS / "cobertura_resumen.csv"
+    df_resumen.to_csv(ruta_resumen, index=False, encoding="utf-8-sig")
 
     total_mbpe = df_cob["BASELINE_1P_MBPE"].sum()
     pres_mbpe  = df_cob[df_cob["EN_PREDICCION"]]["BASELINE_1P_MBPE"].sum()

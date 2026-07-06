@@ -29,7 +29,8 @@ table Predicción
 		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	/// Precio neto realizado que sale de M2 (Brent − descuentos, absorbidos en β).
-	column 'Precio Neto Efectivo (USD/bbl)'
+	/// Precio Neto estimado por el Modelo 2 (α + β·Brent) al Brent del escenario. Es el Precio Neto (Brent − descuentos calidad y transporte) que recibe el campo, no el Brent.
+	column 'Precio Neto M2 (USD/bbl)'
 		dataType: double
 		formatString: $#,##0.00
 		displayFolder: 2. Precios
@@ -330,7 +331,8 @@ table Predicción
 				let
 				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_matriz_prediccion.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
-				    Tipos = Table.TransformColumnTypes(Prom, {{"CAMPO", type text}, {"MOTOR", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_EFECTIVO_USD_BBL", type number}, {"DELTA_PRED_MBPE", type number}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"DELTA_VS_BASE_MBPE", type number}, {"DELTA_VS_BASE_PCT", type number}, {"BRENT_REF_USD_BBL", type number}, {"P_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"BREAKEVEN_FINANCIERO_USD_BBL", type number}, {"BREAKEVEN_OPERACIONAL_USD_BBL", type number}, {"BK_REFERENCIA_FIN_USD_BBL", type number}, {"BK_REFERENCIA_OPE_USD_BBL", type number}, {"ES_VIABLE", type logical}, {"ES_FULL_RESERVAS", type logical}, {"ES_EXTRAPOLADO", type logical}, {"TIPO_DATO", type text}, {"Q_OBJETIVO", type text}, {"VIGENCIA_BASE", type text}, {"FECHA_PREDICCION", type date}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}}, "en-US")
+				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				    Tipos = Table.TransformColumnTypes(SinBOM, {{"CAMPO", type text}, {"MOTOR", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_EFECTIVO_USD_BBL", type number}, {"DELTA_PRED_MBPE", type number}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"DELTA_VS_BASE_MBPE", type number}, {"DELTA_VS_BASE_PCT", type number}, {"BRENT_REF_USD_BBL", type number}, {"P_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"BREAKEVEN_FINANCIERO_USD_BBL", type number}, {"BREAKEVEN_OPERACIONAL_USD_BBL", type number}, {"BK_REFERENCIA_FIN_USD_BBL", type number}, {"BK_REFERENCIA_OPE_USD_BBL", type number}, {"ES_VIABLE", type logical}, {"ES_FULL_RESERVAS", type logical}, {"ES_EXTRAPOLADO", type logical}, {"TIPO_DATO", type text}, {"Q_OBJETIVO", type text}, {"VIGENCIA_BASE", type text}, {"FECHA_PREDICCION", type date}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}}, "en-US")
 				in
 				    Tipos
 

@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
-  "name": "a8ef8401858b34c4940e",
+  "name": "m1CardDiverg0000001",
   "position": {
-    "x": 1288,
-    "y": 656,
-    "z": 10000,
+    "x": 960,
+    "y": 866,
+    "z": 6700,
     "height": 170,
-    "width": 288,
-    "tabOrder": 10000
+    "width": 448,
+    "tabOrder": 6700
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,17 +22,17 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Diagnóstico M2"
+                          "Entity": "Predicción"
                         }
                       },
-                      "Property": "MAE LOO"
+                      "Property": "Divergencia Motores (%)"
                     }
                   },
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Diagnóstico M2.MAE LOO)",
-              "nativeQueryRef": "Avg of MAE LOO"
+              "queryRef": "Avg(Predicción.Divergencia Motores (%))",
+              "nativeQueryRef": "Avg of Divergencia Motores (%)"
             }
           ]
         }
@@ -84,7 +84,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'MAE LOO'"
+                  "Value": "'Divergencia Iso/Suave (<30% bueno)'"
                 }
               }
             }
@@ -123,7 +123,7 @@
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#94A3B8'"
+                      "Value": "'#009639'"
                     }
                   }
                 }

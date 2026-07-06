@@ -1,0 +1,59 @@
+/// Puntos del Modelo 2 (Brent → Precio Neto): recta Theil-Sen ajustada + puntos HIST reales por año (los cierres anuales con que se ajusta la recta). Serie separa recta / real; Año colorea los reales por vigencia.
+table 'Puntos M2'
+	lineageTag: 5d2b8e13-7c39-4f82-ae16-2b8f5d9e3c20
+
+	column IDX
+		dataType: int64
+		isHidden
+		lineageTag: 5d2b8e13-7c39-4f82-ae16-2b8f5d9e3c21
+		summarizeBy: none
+		sourceColumn: IDX
+
+	/// Clave de campo (une con la dimensión Campo).
+	column CAMPO
+		dataType: string
+		lineageTag: 5d2b8e13-7c39-4f82-ae16-2b8f5d9e3c22
+		summarizeBy: none
+		sourceColumn: CAMPO
+
+	/// Serie: Recta (modelo Theil-Sen), Real {año} (cierre HIST observado).
+	column Serie
+		dataType: string
+		lineageTag: 5d2b8e13-7c39-4f82-ae16-2b8f5d9e3c23
+		summarizeBy: none
+		sourceColumn: SERIE
+
+	/// Año del cierre HIST (vacío en la recta).
+	column Año
+		dataType: int64
+		lineageTag: 5d2b8e13-7c39-4f82-ae16-2b8f5d9e3c24
+		summarizeBy: none
+		sourceColumn: AÑO
+
+	/// Brent (eje X).
+	column 'Brent (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: 5d2b8e13-7c39-4f82-ae16-2b8f5d9e3c25
+		summarizeBy: none
+		sourceColumn: BRENT_USD_BBL
+
+	/// Precio Neto (eje Y). En reales el neto observado; en la recta la predicción α+β·Brent.
+	column 'Precio Neto (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: 5d2b8e13-7c39-4f82-ae16-2b8f5d9e3c26
+		summarizeBy: none
+		sourceColumn: PRECIO_NETO_USD_BBL
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_puntos_m2.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				    Tipos = Table.TransformColumnTypes(SinBOM, {{"IDX", Int64.Type}, {"CAMPO", type text}, {"SERIE", type text}, {"AÑO", Int64.Type}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_USD_BBL", type number}}, "en-US")
+				in
+				    Tipos
+

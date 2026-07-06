@@ -44,7 +44,11 @@ table _Medidas
 		displayFolder: 1. Volumen
 		lineageTag: 7cfc01e8-8669-46e3-bd82-df32ca3a089d
 
-	measure '% Volumen Viable' = DIVIDE ( CALCULATE ( [Vol 1P Predicho], KEEPFILTERS ( 'Predicción'[Es Viable] = TRUE () ) ), [Vol 1P Predicho] )
+	/// % de la materialidad (1P certificado) que sigue siendo viable al Brent del escenario:
+	/// suma del baseline de los campos con Precio Neto ≥ Breakeven Operacional / baseline total.
+	/// Reemplaza a '% Volumen Viable' (que daba 100% siempre: el volumen predicho ya es 0 bajo
+	/// el breakeven por el piso duro, así que no-viables no restaban del cociente).
+	measure '% Materialidad Viable' = DIVIDE ( CALCULATE ( [Vol 1P Baseline], KEEPFILTERS ( 'Predicción'[Es Viable] = TRUE () ) ), [Vol 1P Baseline] )
 		formatString: 0.0%
 		displayFolder: 1. Volumen
 		lineageTag: 6f95e5b1-ad90-4a19-b607-dfd91285b334
@@ -95,14 +99,14 @@ table _Medidas
 		displayFolder: 2. Price Intelligence
 		lineageTag: 558945e2-6356-4ed0-97f7-7992b2cb2d34
 
-	/// Precio Neto Efectivo menos Breakeven Operacional. Usar con un campo y Brent seleccionados.
-	measure 'Colchón vs BK Operacional (USD)' = CALCULATE ( AVERAGE ( 'Predicción'[Precio Neto Efectivo (USD/bbl)] ) - AVERAGE ( 'Predicción'[Breakeven Operacional (USD/bbl)] ) )
+	/// Precio Neto M2 menos Breakeven Operacional. Usar con un campo y Brent seleccionados.
+	measure 'Colchón vs BK Operacional (USD)' = CALCULATE ( AVERAGE ( 'Predicción'[Precio Neto M2 (USD/bbl)] ) - AVERAGE ( 'Predicción'[Breakeven Operacional (USD/bbl)] ) )
 		formatString: $#,##0.00
 		displayFolder: 2. Price Intelligence
 		lineageTag: c2456978-bd46-49ba-9f6f-bfb6324799f3
 
-	/// Precio Neto Efectivo menos Breakeven Financiero. Usar con un campo y Brent seleccionados.
-	measure 'Colchón vs BK Financiero (USD)' = CALCULATE ( AVERAGE ( 'Predicción'[Precio Neto Efectivo (USD/bbl)] ) - AVERAGE ( 'Predicción'[Breakeven Financiero (USD/bbl)] ) )
+	/// Precio Neto M2 menos Breakeven Financiero. Usar con un campo y Brent seleccionados.
+	measure 'Colchón vs BK Financiero (USD)' = CALCULATE ( AVERAGE ( 'Predicción'[Precio Neto M2 (USD/bbl)] ) - AVERAGE ( 'Predicción'[Breakeven Financiero (USD/bbl)] ) )
 		formatString: $#,##0.00
 		displayFolder: 2. Price Intelligence
 		lineageTag: de91332c-4172-4932-b644-b8a47f9cc0d7
@@ -138,6 +142,81 @@ table _Medidas
 		formatString: 0.0%
 		displayFolder: 3. Confiabilidad
 		lineageTag: 315c62d9-a22d-4149-bcba-81566d937b5a
+
+	/// Título dinámico del escenario Brent (páginas 1–3).
+	measure 'Título Escenario' = "Reservas 1P del portafolio — Brent " & FORMAT ( [Brent Escenario (USD/bbl)], "$#,##0" ) & "/bbl"
+		displayFolder: 0. Títulos
+		lineageTag: 1f4e2c90-7a3b-4d51-9c68-2e5b8a4f0c11
+
+	/// Título dinámico con el campo seleccionado (Explorador / Diagnóstico).
+	measure 'Título Campo' = "Respuesta al precio — " & SELECTEDVALUE ( Campo[Campo], "Portafolio completo" )
+		displayFolder: 0. Títulos
+		lineageTag: 2a5f3d81-8b4c-4e62-ad79-3f6c9b5a1d22
+
+	/// Quarter objetivo + fecha de generación de la predicción vigente (para la cabecera).
+	measure 'Fecha Última Predicción' = "Predicción " & MAX ( 'Predicción'[Q Objetivo] ) & " · generada " & FORMAT ( MAX ( 'Predicción'[Fecha Predicción] ), "yyyy-mm-dd" )
+		displayFolder: 0. Títulos
+		lineageTag: 3b6f4e92-9c5d-4a73-be18-4d7fac6b2e33
+
+	/// Breakeven Operacional (precio de abandono) del campo seleccionado. Para línea de referencia.
+	measure 'BK Operacional (USD/bbl)' = AVERAGE ( 'Predicción'[Breakeven Operacional (USD/bbl)] )
+		formatString: $#,##0.00
+		displayFolder: 2. Price Intelligence
+		lineageTag: 5e8b2a41-3c9d-4e17-b6a2-7f1c8d4e9a51
+
+	/// Breakeven Financiero (VPN=0) del campo seleccionado. Para línea de referencia.
+	measure 'BK Financiero (USD/bbl)' = AVERAGE ( 'Predicción'[Breakeven Financiero (USD/bbl)] )
+		formatString: $#,##0.00
+		displayFolder: 2. Price Intelligence
+		lineageTag: 5e8b2a41-3c9d-4e17-b6a2-7f1c8d4e9a52
+
+	/// Campos con recta M2 frágil (fallback, <5 puntos o R² LOO<0). Traducción Brent→precio poco confiable.
+	measure 'Alerta M2 Frágil' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[M2 Frágil] = TRUE () ) )
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 4c7a5f13-2e8b-49d6-a1f4-5b9e3c7d8a41
+
+	/// Campos con outlier en validación LOO de M1 (RMSE/MAE > 2): un punto real domina el error.
+	measure 'Alerta Outlier LOO' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Alerta LOO Outlier] = TRUE () ) )
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 4c7a5f13-2e8b-49d6-a1f4-5b9e3c7d8a42
+
+	/// Campos con sensibilidad no identificada (confound de vigencia): la pendiente de precio no es separable del cambio de deck anual.
+	measure 'Alerta Confound' = CALCULATE ( DISTINCTCOUNT ( 'Predicción'[Campo Clave] ), KEEPFILTERS ( 'Predicción'[Sensibilidad No Identificada] = TRUE () ) )
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 4c7a5f13-2e8b-49d6-a1f4-5b9e3c7d8a43
+
+	/// Total de banderas de alerta activas (un campo puede disparar varias).
+	measure '# Alertas Total' = [Alerta M2 Frágil] + [Alerta Outlier LOO] + [Alerta Confound]
+		formatString: #,##0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 4c7a5f13-2e8b-49d6-a1f4-5b9e3c7d8a44
+
+	/// Volumen del campo SOLO si dispara M2 Frágil (blanco si no) — para barra apilada por tipo de alerta.
+	measure 'Vol si M2 Frágil (MBPE)' = IF ( CALCULATE ( COUNTROWS ( FILTER ( 'Predicción', 'Predicción'[M2 Frágil] = TRUE () ) ) ) > 0, [Vol 1P Predicho] )
+		formatString: #,##0.0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 6d8b3f24-9a5c-4e82-bf39-6c8d2e5f9b61
+
+	/// Volumen del campo SOLO si dispara Outlier LOO.
+	measure 'Vol si Outlier LOO (MBPE)' = IF ( CALCULATE ( COUNTROWS ( FILTER ( 'Predicción', 'Predicción'[Alerta LOO Outlier] = TRUE () ) ) ) > 0, [Vol 1P Predicho] )
+		formatString: #,##0.0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 6d8b3f24-9a5c-4e82-bf39-6c8d2e5f9b62
+
+	/// Volumen del campo SOLO si dispara Confound de vigencia.
+	measure 'Vol si Confound (MBPE)' = IF ( CALCULATE ( COUNTROWS ( FILTER ( 'Predicción', 'Predicción'[Sensibilidad No Identificada] = TRUE () ) ) ) > 0, [Vol 1P Predicho] )
+		formatString: #,##0.0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 6d8b3f24-9a5c-4e82-bf39-6c8d2e5f9b63
+
+	/// Suma de las 3 medidas de alerta (orden de la barra apilada; no se muestra en el visual).
+	measure 'Total Vol Alertas (MBPE)' = COALESCE ( [Vol si M2 Frágil (MBPE)], 0 ) + COALESCE ( [Vol si Outlier LOO (MBPE)], 0 ) + COALESCE ( [Vol si Confound (MBPE)], 0 )
+		formatString: #,##0.0
+		displayFolder: 3. Confiabilidad
+		lineageTag: 6d8b3f24-9a5c-4e82-bf39-6c8d2e5f9b64
 
 	column _
 		dataType: string

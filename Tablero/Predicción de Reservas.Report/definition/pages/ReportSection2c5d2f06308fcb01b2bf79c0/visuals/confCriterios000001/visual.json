@@ -1,0 +1,201 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "confCriterios000001",
+  "position": {
+    "x": 1288,
+    "y": 728,
+    "z": 11000,
+    "height": 320,
+    "width": 600,
+    "tabOrder": 11000
+  },
+  "visual": {
+    "visualType": "textbox",
+    "objects": {
+      "general": [
+        {
+          "properties": {
+            "paragraphs": [
+              {
+                "textRuns": [
+                  {
+                    "value": "Cómo leer la confianza (orden de importancia)",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "12px",
+                      "color": "#00602A"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "ALTA: ≥6 puntos reales · MAE <20% del certificado · divergencia Iso/Suave <30% · supera al predictor ingenuo.",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "MEDIA: MAE <40% y divergencia <50%, o alerta material (confound / M2 frágil) que baja desde ALTA.",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "BAJA: no cumple lo anterior, o baseline <0.5 MBPE (micro-campo).  SOLO SINTÉTICO: sin puntos reales.",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": " ",
+                    "textStyle": {
+                      "fontSize": "6px"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "MAE Rel LOO",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  },
+                  {
+                    "value": ": error de validación dejar-uno-fuera vs 1P certificado (<20% bueno).",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Divergencia motores",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  },
+                  {
+                    "value": ": Isotónica vs Suave (<30% bueno).",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "M2 frágil",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#C2410C"
+                    }
+                  },
+                  {
+                    "value": ": recta Brent→precio en fallback, <5 puntos o R² LOO<0.",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Outlier LOO",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#C2410C"
+                    }
+                  },
+                  {
+                    "value": ": un punto real domina el error (RMSE/MAE>2).",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Confound de vigencia",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#C2410C"
+                    }
+                  },
+                  {
+                    "value": ": la pendiente de precio no es separable del cambio de deck anual (η²≥0.8, bandas de precio sin solape).",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "background": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#F1F5F9'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

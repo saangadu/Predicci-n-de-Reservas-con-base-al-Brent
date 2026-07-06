@@ -112,7 +112,8 @@ table 'Diagnóstico M2'
 				let
 				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_matriz_modelo2.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
-				    Tipos = Table.TransformColumnTypes(Prom, {{"CAMPO", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_ACEITE_USD_BBL", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"N_PUNTOS", Int64.Type}, {"R2", type number}, {"R2_LOO", type number}, {"MAE_LOO", type number}, {"ALERTA", type text}, {"M2_FRAGIL", type logical}}, "en-US")
+				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				    Tipos = Table.TransformColumnTypes(SinBOM, {{"CAMPO", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_ACEITE_USD_BBL", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"N_PUNTOS", Int64.Type}, {"R2", type number}, {"R2_LOO", type number}, {"MAE_LOO", type number}, {"ALERTA", type text}, {"M2_FRAGIL", type logical}}, "en-US")
 				in
 				    Tipos
 

@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
-  "name": "a8ef8401858b34c4940e",
+  "name": "fe0a11feca20250706aa",
   "position": {
-    "x": 1288,
-    "y": 656,
-    "z": 10000,
-    "height": 170,
-    "width": 288,
-    "tabOrder": 10000
+    "x": 888,
+    "y": 40,
+    "z": 2001,
+    "height": 56,
+    "width": 376,
+    "tabOrder": 2001
   },
   "visual": {
     "visualType": "cardVisual",
@@ -17,22 +17,17 @@
           "projections": [
             {
               "field": {
-                "Aggregation": {
+                "Measure": {
                   "Expression": {
-                    "Column": {
-                      "Expression": {
-                        "SourceRef": {
-                          "Entity": "Diagnóstico M2"
-                        }
-                      },
-                      "Property": "MAE LOO"
+                    "SourceRef": {
+                      "Entity": "_Medidas"
                     }
                   },
-                  "Function": 1
+                  "Property": "Fecha Última Predicción"
                 }
               },
-              "queryRef": "Avg(Diagnóstico M2.MAE LOO)",
-              "nativeQueryRef": "Avg of MAE LOO"
+              "queryRef": "_Medidas.Fecha Última Predicción",
+              "nativeQueryRef": "Fecha Última Predicción"
             }
           ]
         }
@@ -61,7 +56,25 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "24D"
+                  "Value": "12D"
+                }
+              }
+            },
+            "horizontalAlignment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'right'"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#64748B'"
+                    }
+                  }
                 }
               }
             }
@@ -77,14 +90,7 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "text": {
-              "expr": {
-                "Literal": {
-                  "Value": "'MAE LOO'"
+                  "Value": "false"
                 }
               }
             }
@@ -93,45 +99,32 @@
             "id": "default"
           }
         }
-      ],
-      "accentBar": [
+      ]
+    },
+    "visualContainerObjects": {
+      "background": [
         {
           "properties": {
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
-            "position": {
-              "expr": {
-                "Literal": {
-                  "Value": "'Left'"
-                }
-              }
-            },
-            "width": {
-              "expr": {
-                "Literal": {
-                  "Value": "4D"
-                }
-              }
-            },
-            "color": {
-              "solid": {
-                "color": {
-                  "expr": {
-                    "Literal": {
-                      "Value": "'#94A3B8'"
-                    }
-                  }
+                  "Value": "false"
                 }
               }
             }
-          },
-          "selector": {
-            "id": "default"
+          }
+        }
+      ],
+      "border": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
           }
         }
       ]

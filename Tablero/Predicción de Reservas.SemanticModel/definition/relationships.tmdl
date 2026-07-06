@@ -31,3 +31,16 @@ relationship 1b7f0fcd-44e3-47ce-a683-8e8862d003e1
 	fromColumn: Predicción.'Fecha Predicción'
 	toColumn: LocalDateTable_e3e48511-2aa2-4383-8a0b-665cc6c3dbf9.Date
 
+relationship Campo_PuntosM1
+	fromColumn: 'Puntos M1'.CAMPO
+	toColumn: Campo.Campo
+
+relationship Campo_PuntosM2
+	fromColumn: 'Puntos M2'.CAMPO
+	toColumn: Campo.Campo
+
+relationship 475a7b9b-03fe-450e-b6fb-2f358acfb139
+	joinOnDateBehavior: datePartOnly
+	fromColumn: Bitácora.Fecha
+	toColumn: LocalDateTable_50dd2b90-876b-4779-bf7e-1025dce39798.Date
+

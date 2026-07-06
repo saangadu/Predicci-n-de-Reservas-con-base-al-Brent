@@ -11,7 +11,7 @@ annotation __PBI_TimeIntelligenceEnabled = 1
 
 annotation PBI_ProTooling = ["DevMode","MCP-PBIModeling"]
 
-annotation PBI_QueryOrder = ["Predicción","Diagnóstico M1","Diagnóstico M2","Precio Brent","Motor","Campo","_Medidas","RutaBase"]
+annotation PBI_QueryOrder = ["Predicción","Diagnóstico M1","Diagnóstico M2","Precio Brent","Motor","Campo","Puntos M1","Puntos M2","Bitácora","_Medidas","RutaBase"]
 
 ref table Predicción
 ref table 'Diagnóstico M1'
@@ -22,6 +22,10 @@ ref table Campo
 ref table _Medidas
 ref table DateTableTemplate_25a179f5-2860-4d96-ac3f-68685b168010
 ref table LocalDateTable_e3e48511-2aa2-4383-8a0b-665cc6c3dbf9
+ref table 'Puntos M1'
+ref table 'Puntos M2'
+ref table Bitácora
+ref table LocalDateTable_50dd2b90-876b-4779-bf7e-1025dce39798
 
 ref cultureInfo en-US
 

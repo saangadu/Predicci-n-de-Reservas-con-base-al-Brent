@@ -23,11 +23,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "% Volumen Viable"
+                  "Property": "% Materialidad Viable"
                 }
               },
-              "queryRef": "_Medidas.% Volumen Viable",
-              "nativeQueryRef": "% Volumen Viable"
+              "queryRef": "_Medidas.% Materialidad Viable",
+              "nativeQueryRef": "% Materialidad Viable"
             }
           ]
         }
@@ -79,7 +79,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'% Volumen Viable'"
+                  "Value": "'% Materialidad Viable'"
                 }
               }
             }

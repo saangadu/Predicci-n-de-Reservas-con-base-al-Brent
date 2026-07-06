@@ -1,0 +1,51 @@
+/// Bitácora de decisiones funcionales del modelo (change-log de mejoras, no de commits). Cada fila es una decisión sobre funcionalidad tomada en un momento, para rastrear la evolución del piloto. Fuente: docs/bitacora_decisiones.csv (curado manual).
+table Bitácora
+	lineageTag: 7e3c9a24-8d41-4b93-bf27-3c9a6e1f4d30
+
+	/// Fecha de la decisión.
+	column Fecha
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: 7e3c9a24-8d41-4b93-bf27-3c9a6e1f4d31
+		summarizeBy: none
+		sourceColumn: FECHA
+
+		variation Variation
+			isDefault
+			relationship: 475a7b9b-03fe-450e-b6fb-2f358acfb139
+			defaultHierarchy: LocalDateTable_50dd2b90-876b-4779-bf7e-1025dce39798.'Date Hierarchy'
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Título corto de la decisión.
+	column Título
+		dataType: string
+		lineageTag: 7e3c9a24-8d41-4b93-bf27-3c9a6e1f4d32
+		summarizeBy: none
+		sourceColumn: TITULO
+
+	/// Qué se decidió.
+	column Decisión
+		dataType: string
+		lineageTag: 7e3c9a24-8d41-4b93-bf27-3c9a6e1f4d33
+		summarizeBy: none
+		sourceColumn: DECISION
+
+	/// Impacto en el modelo / la lectura del tablero.
+	column Impacto
+		dataType: string
+		lineageTag: 7e3c9a24-8d41-4b93-bf27-3c9a6e1f4d34
+		summarizeBy: none
+		sourceColumn: IMPACTO
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaBase & "\docs\bitacora_decisiones.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				    Tipos = Table.TransformColumnTypes(SinBOM, {{"FECHA", type date}, {"TITULO", type text}, {"DECISION", type text}, {"IMPACTO", type text}}, "en-US")
+				in
+				    Tipos
+

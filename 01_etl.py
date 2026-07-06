@@ -233,28 +233,60 @@ def leer_consolidado() -> pd.DataFrame:
     B6: Filas con neto OK y res NaN → incluir con ALERTA=TARGET_NULO.
     """
     raw = pd.read_excel(CONSOLIDADO, sheet_name="Consolidado", header=None, engine="openpyxl")
-    # Layout 2026: col B(1)=Incluir, col D(3)=Nombre, Precio Neto E-M(4-12),
-    # Desc Cal N-V(13-21), Desc Tra W-AE(22-30), Reservas 1P AF-AN(31-39)
-    quarters = [str(raw.iloc[5, c]).strip() for c in range(4, 13)]
+    # Layout 2026-07 (detección dinámica): se insertó columna ID y los bloques
+    # dejaron de tener igual ancho — Precio Neto/Desc Calidad/Desc Transporte traen
+    # 10 quarters (…2026_Q2) mientras Reservas 1P trae 9 (…2026_Q1, sin deck Q2 aún).
+    # Se localizan columnas por etiqueta en vez de offsets fijos para no romper con
+    # cada quarter nuevo:
+    #   fila 4  → títulos "Precio Neto|Descuento Calidad|Descuento Transporte YYYY_QN"
+    #   fila 5  → quarter del bloque Reservas 1P
+    #   fila 6  → cabeceras cortas (Incluir, ID, Nombre, ..., "Reservas 1P")
+    #   datos desde fila 7.
+    hdr = raw.iloc[6].astype(str).str.strip()
+    incluir_col = int(hdr[hdr.str.upper() == "INCLUIR"].index[0])
+    nombre_col  = int(hdr[hdr.str.upper() == "NOMBRE"].index[0])
 
-    NETO0, CAL0, TRA0, RES0 = 4, 13, 22, 31
+    # Mapas {quarter: col} por métrica desde los títulos de fila 4
+    import re as _re
+    fila4 = raw.iloc[4]
+    map_neto, map_cal, map_tra = {}, {}, {}
+    pat = _re.compile(r"^(Precio Neto|Descuento Calidad|Descuento Transporte)\s+(\d{4}_Q\d)$")
+    for c in range(raw.shape[1]):
+        m = pat.match(str(fila4.iloc[c]).strip())
+        if not m:
+            continue
+        metrica, q = m.group(1), m.group(2)
+        {"Precio Neto": map_neto, "Descuento Calidad": map_cal,
+         "Descuento Transporte": map_tra}[metrica][q] = c
+
+    # Reservas 1P: cabecera corta en fila 6, quarter en fila 5 (bloque más angosto)
+    fila5 = raw.iloc[5]
+    map_res = {}
+    for c in range(raw.shape[1]):
+        if str(hdr.iloc[c]).strip().upper() == "RESERVAS 1P":
+            q = str(fila5.iloc[c]).strip()
+            if _re.match(r"^\d{4}_Q\d$", q):
+                map_res[q] = c
+
+    # Recorrer los quarters con Precio Neto (los completos); Reservas puede faltar
+    quarters = sorted(map_neto.keys())
     datos = raw.iloc[7:].reset_index(drop=True)
 
-    # Brent de referencia por quarter (fila BRENT del deck — col D, índice 3)
-    fila_brent = datos[datos[3].astype(str).str.strip().str.upper() == "BRENT"]
+    # Brent de referencia por quarter (fila BRENT del deck — columna Nombre)
+    fila_brent = datos[datos[nombre_col].astype(str).str.strip().str.upper() == "BRENT"]
     brent_q = {}
     if not fila_brent.empty:
         r = fila_brent.iloc[0]
-        for qi, q in enumerate(quarters):
-            brent_q[q] = pd.to_numeric(r.iloc[NETO0 + qi], errors="coerce")
+        for q in quarters:
+            brent_q[q] = pd.to_numeric(r.iloc[map_neto[q]], errors="coerce")
 
     # B5: Paso 1 — homologar TODOS los campos Incluir=Si para auditoria completa
     todos_hom = []
     for _, r in datos.iterrows():
-        nombre = str(r.iloc[3]).strip()
+        nombre = str(r.iloc[nombre_col]).strip()
         if not nombre or nombre.upper() in ("BRENT", "NAN", "NOMBRE"):
             continue
-        incluir = str(r.iloc[1]).strip().upper()
+        incluir = str(r.iloc[incluir_col]).strip().upper()
         if incluir == "NO":
             continue
         campo, flag = H.homologar(nombre)
@@ -266,24 +298,24 @@ def leer_consolidado() -> pd.DataFrame:
     # Paso 2: procesar campos piloto con Incluir=Si
     filas = []
     for _, r in datos.iterrows():
-        nombre = str(r.iloc[3]).strip()
+        nombre = str(r.iloc[nombre_col]).strip()
         if not nombre or nombre.upper() in ("BRENT", "NAN", "NOMBRE"):
             continue
-        incluir = str(r.iloc[1]).strip().upper()
+        incluir = str(r.iloc[incluir_col]).strip().upper()
         if incluir == "NO":
             continue
         campo, flag = H.homologar(nombre)
         if CAMPOS_PILOTO and campo not in CAMPOS_PILOTO:
             continue
 
-        for qi, q in enumerate(quarters):
-            neto = pd.to_numeric(r.iloc[NETO0 + qi], errors="coerce")
+        for q in quarters:
+            neto = pd.to_numeric(r.iloc[map_neto[q]], errors="coerce")
             if pd.isna(neto) or neto == 0:
                 continue
 
-            cal_raw = pd.to_numeric(r.iloc[CAL0 + qi], errors="coerce")
-            tra_raw = pd.to_numeric(r.iloc[TRA0 + qi], errors="coerce")
-            res     = pd.to_numeric(r.iloc[RES0 + qi], errors="coerce")
+            cal_raw = pd.to_numeric(r.iloc[map_cal[q]], errors="coerce") if q in map_cal else np.nan
+            tra_raw = pd.to_numeric(r.iloc[map_tra[q]], errors="coerce") if q in map_tra else np.nan
+            res     = pd.to_numeric(r.iloc[map_res[q]], errors="coerce") if q in map_res else np.nan
             brent   = brent_q.get(q, np.nan)
             anio    = int(q.split("_")[0])
 

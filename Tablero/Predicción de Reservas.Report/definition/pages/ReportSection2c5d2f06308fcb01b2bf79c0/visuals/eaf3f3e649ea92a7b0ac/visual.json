@@ -42,11 +42,119 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Vol 1P Predicho"
+                  "Property": "Vol si M2 Frágil (MBPE)"
                 }
               },
-              "queryRef": "_Medidas.Vol 1P Predicho",
-              "nativeQueryRef": "Vol 1P Predicho"
+              "queryRef": "_Medidas.Vol si M2 Frágil (MBPE)",
+              "nativeQueryRef": "Vol si M2 Frágil (MBPE)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Vol si Outlier LOO (MBPE)"
+                }
+              },
+              "queryRef": "_Medidas.Vol si Outlier LOO (MBPE)",
+              "nativeQueryRef": "Vol si Outlier LOO (MBPE)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Vol si Confound (MBPE)"
+                }
+              },
+              "queryRef": "_Medidas.Vol si Confound (MBPE)",
+              "nativeQueryRef": "Vol si Confound (MBPE)"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Predicción"
+                        }
+                      },
+                      "Property": "Nivel Confianza"
+                    }
+                  },
+                  "Function": 3
+                }
+              },
+              "queryRef": "Min(Predicción.Nivel Confianza)",
+              "nativeQueryRef": "Min of Nivel Confianza"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Predicción"
+                        }
+                      },
+                      "Property": "Motivo Confianza"
+                    }
+                  },
+                  "Function": 3
+                }
+              },
+              "queryRef": "Min(Predicción.Motivo Confianza)",
+              "nativeQueryRef": "Min of Motivo Confianza"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Predicción"
+                        }
+                      },
+                      "Property": "MAE Rel LOO"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Avg(Predicción.MAE Rel LOO)",
+              "nativeQueryRef": "Avg of MAE Rel LOO"
+            },
+            {
+              "field": {
+                "Aggregation": {
+                  "Expression": {
+                    "Column": {
+                      "Expression": {
+                        "SourceRef": {
+                          "Entity": "Predicción"
+                        }
+                      },
+                      "Property": "Divergencia Motores (%)"
+                    }
+                  },
+                  "Function": 1
+                }
+              },
+              "queryRef": "Avg(Predicción.Divergencia Motores (%))",
+              "nativeQueryRef": "Avg of Divergencia Motores (%)"
             }
           ]
         }
@@ -61,7 +169,7 @@
                     "Entity": "_Medidas"
                   }
                 },
-                "Property": "Vol 1P Predicho"
+                "Property": "Total Vol Alertas (MBPE)"
               }
             },
             "direction": "Descending"
@@ -97,20 +205,79 @@
           }
         }
       ],
+      "legend": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "position": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Top'"
+                }
+              }
+            }
+          }
+        }
+      ],
       "dataPoint": [
         {
           "properties": {
-            "defaultColor": {
+            "fill": {
               "solid": {
                 "color": {
                   "expr": {
                     "Literal": {
-                      "Value": "'#009639'"
+                      "Value": "'#C2410C'"
                     }
                   }
                 }
               }
             }
+          },
+          "selector": {
+            "metadata": "_Medidas.Vol si M2 Frágil (MBPE)"
+          }
+        },
+        {
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#A87900'"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "_Medidas.Vol si Outlier LOO (MBPE)"
+          }
+        },
+        {
+          "properties": {
+            "fill": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#94A3B8'"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "_Medidas.Vol si Confound (MBPE)"
           }
         }
       ]
@@ -129,7 +296,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Volumen por campo (revisar frágiles)'"
+                  "Value": "'Qué alerta dispara cada campo (volumen MBPE)'"
                 }
               }
             },

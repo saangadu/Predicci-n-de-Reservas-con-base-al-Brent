@@ -19,10 +19,23 @@
               {
                 "textRuns": [
                   {
-                    "value": "Clic derecho en la curva → Explorar en profundidad → Diagnóstico Campo",
+                    "value": "▸ Diagnóstico técnico",
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
-                      "fontSize": "11px",
+                      "fontSize": "13px",
+                      "color": "#00602A"
+                    }
+                  }
+                ],
+                "horizontalTextAlignment": "left"
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Clic derecho en cualquier gráfica → Explorar en profundidad → Diagnóstico Campo",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
                       "color": "#1E293B"
                     }
                   }
@@ -41,7 +54,18 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#DCF0E2'"
+                    }
+                  }
                 }
               }
             }
@@ -54,7 +78,18 @@
             "show": {
               "expr": {
                 "Literal": {
-                  "Value": "false"
+                  "Value": "true"
+                }
+              }
+            },
+            "color": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#009639'"
+                    }
+                  }
                 }
               }
             }

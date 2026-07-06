@@ -53,6 +53,30 @@ def test_tres_matrices_existen():
         assert c in m2.columns, f"Falta {c} en output_matriz_modelo2.csv"
 
 
+def test_puntos_reales_export():
+    """Exports de puntos (modelo + reales + ancla) para replicar plots en Power BI."""
+    ruta_m1 = RESULTADOS / "output_puntos_m1.csv"
+    ruta_m2 = RESULTADOS / "output_puntos_m2.csv"
+    assert ruta_m1.exists() and ruta_m2.exists(), "Faltan output_puntos_m1/m2.csv"
+    pm1 = pd.read_csv(ruta_m1)
+    pm2 = pd.read_csv(ruta_m2)
+    for c in ["IDX", "CAMPO", "SERIE", "AÑO", "PRECIO_NETO_USD_BBL",
+              "DELTA_MBPE", "VOLUMEN_MBPE"]:
+        assert c in pm1.columns, f"Falta {c} en output_puntos_m1.csv"
+    for c in ["IDX", "CAMPO", "SERIE", "AÑO", "BRENT_USD_BBL", "PRECIO_NETO_USD_BBL"]:
+        assert c in pm2.columns, f"Falta {c} en output_puntos_m2.csv"
+    # Gate dorado: series de modelo + reales + ancla presentes; ancla unica por campo
+    for campo in CAMPOS_PILOTO:
+        sub = pm1[pm1["CAMPO"] == campo]
+        series = set(sub["SERIE"].unique())
+        assert {"Isotónica", "Suave", "Ancla"} <= series, f"{campo}: faltan series M1 {series}"
+        assert any(s.startswith("Real ") for s in series), f"{campo}: sin puntos reales M1"
+        assert (sub["SERIE"] == "Ancla").sum() == 1, f"{campo}: ancla no unica"
+        m2s = set(pm2[pm2["CAMPO"] == campo]["SERIE"].unique())
+        assert "Recta" in m2s and any(s.startswith("Real ") for s in m2s), \
+            f"{campo}: faltan series M2 {m2s}"
+
+
 def test_columnas_obligatorias(df_export):
     cols = ["CAMPO", "MOTOR", "BRENT_USD_BBL",
             "PRECIO_NETO_EFECTIVO_USD_BBL", "DELTA_PRED_MBPE",
@@ -281,11 +305,112 @@ def test_gate_skill_en_confianza():
     nivel, _ = mod.clasificar_confianza(**base, skill=0.5, mae_naive=14.0)
     assert nivel == "ALTA"
     # Sin skill pero campo plano (naive pequeño) → exento, ALTA (caso CAÑO SUR ESTE)
-    nivel, _ = mod.clasificar_confianza(**base, skill=-0.4, mae_naive=1.2)
-    assert nivel == "ALTA"
+    # Informe 2026-07-01 WS2.1: el nivel se mantiene ALTA (el error SIGUE bajo),
+    # pero el motivo debe marcar la insensibilidad en campos materiales para que
+    # nadie lea "confiable en el +X%" donde el modelo no extrae señal de precio.
+    nivel, motivo = mod.clasificar_confianza(**base, skill=-0.4, mae_naive=1.2)
+    assert nivel == "ALTA" and "insensible-al-precio" in motivo
     # SKILL NaN no penaliza
     nivel, _ = mod.clasificar_confianza(**base)
     assert nivel == "ALTA"
+
+
+def test_m2_fragil_degrada_confianza():
+    """Informe 2026-07-01 WS2.2/WS2.3: un campo material cuyo Modelo 2 (Brent->Aceite)
+    es fragil (fallback de portafolio, n<5 puntos HIST, o R2_LOO<0) no debe exhibir
+    ALTA aunque M1 luzca preciso — la cadena completa depende de esa recta.
+    Caso real: CHICHIMENE SW, M2 con 3 puntos (PROPORCIONAL, sin R2_LOO)."""
+    import importlib
+    mod = importlib.import_module("04_pbi_export")
+
+    coef_fragil_n = {"ES_FALLBACK": False, "N_PUNTOS": 3, "R2_LOO": np.nan}
+    assert mod.es_m2_fragil(coef_fragil_n) is True
+
+    coef_fragil_r2 = {"ES_FALLBACK": False, "N_PUNTOS": 9, "R2_LOO": -0.5}
+    assert mod.es_m2_fragil(coef_fragil_r2) is True
+
+    coef_fallback = {"ES_FALLBACK": True, "N_PUNTOS": 0, "R2_LOO": np.nan}
+    assert mod.es_m2_fragil(coef_fallback) is True
+
+    coef_solido = {"ES_FALLBACK": False, "N_PUNTOS": 9, "R2_LOO": 0.85}
+    assert mod.es_m2_fragil(coef_solido) is False
+
+    base = dict(n_real=8, mae_rel=0.09, divergencia=0.05, baseline=65.9, mae_abs=5.64,
+                skill=0.5, mae_naive=11.39)
+    # Sin m2_fragil: pasaria ALTA (buen MAE, buen skill)
+    nivel, _ = mod.clasificar_confianza(**base, m2_fragil=False)
+    assert nivel == "ALTA"
+    # Con m2_fragil en campo material: techo MEDIA, motivo marcado
+    nivel, motivo = mod.clasificar_confianza(**base, m2_fragil=True)
+    assert nivel == "MEDIA" and "M2-fragil" in motivo
+    # Campo NO material (baseline pequeño): m2_fragil no degrada (no hay CAPEX en juego)
+    base_chico = dict(base); base_chico["baseline"] = 5.0
+    nivel, _ = mod.clasificar_confianza(**base_chico, m2_fragil=True)
+    assert nivel == "ALTA"
+
+
+def test_confound_degrada_confianza():
+    """Confound de vigencia (informe 2026-07-02 §3ter): en campos materiales donde
+    el año de Consolidado explica el delta (η²≥0.8) y las bandas de precio de los
+    años no se solapan, la pendiente de M1 no es efecto precio identificado ->
+    techo MEDIA con motivo 'sensibilidad-no-identificada'. Caso real: CASTILLA
+    (η²=0.997, salto +46 MBPE = 24.6% del baseline en la frontera 2024/2025)."""
+    import importlib
+    mod = importlib.import_module("04_pbi_export")
+
+    base = dict(n_real=8, mae_rel=0.03, divergencia=0.05, baseline=186.0, mae_abs=6.08,
+                skill=0.77, mae_naive=26.18)
+    # Sin flag: pasa ALTA (buen MAE, buen skill — CASTILLA hoy)
+    nivel, _ = mod.clasificar_confianza(**base, sens_no_ident=False)
+    assert nivel == "ALTA"
+    # Con flag en campo material: techo MEDIA, motivo marcado
+    nivel, motivo = mod.clasificar_confianza(**base, sens_no_ident=True)
+    assert nivel == "MEDIA" and "sensibilidad-no-identificada" in motivo
+    # Campo mediano (>=20 MBPE, caso LA CIRA/YARIGUI): tambien degrada — la
+    # materialidad del confound es 20, mas estricta que los 50 de otras etiquetas
+    base_med = dict(base); base_med["baseline"] = 31.6
+    nivel, motivo = mod.clasificar_confianza(**base_med, sens_no_ident=True)
+    assert nivel == "MEDIA" and "sensibilidad-no-identificada" in motivo
+    # Campo NO material (<20): el flag no degrada
+    base_chico = dict(base); base_chico["baseline"] = 5.0
+    nivel, _ = mod.clasificar_confianza(**base_chico, sens_no_ident=True)
+    assert nivel == "ALTA"
+
+
+def test_calcular_confound_vigencia():
+    """calcular_confound_vigencia detecta el patron año-explica-delta con bandas
+    de precio separadas, y NO flaggea cuando el delta varia dentro de cada año."""
+    import importlib
+    mod = importlib.import_module("04_pbi_export")
+
+    def _tablon(deltas_2024, deltas_2025, netos_2024, netos_2025):
+        n = len(deltas_2024) + len(deltas_2025)
+        return pd.DataFrame({
+            "CAMPO": ["X"] * n,
+            "ES_BASELINE": [False] * n,
+            "ES_SINTETICO": [False] * n,
+            "VIGENCIA": ["2024_Q1"] * len(deltas_2024) + ["2025_Q1"] * len(deltas_2025),
+            "DELTA_SENS_MBPE": deltas_2024 + deltas_2025,
+            "PRECIO_NETO_USD_BBL": netos_2024 + netos_2025,
+        })
+
+    # Patron CASTILLA: 2024 plano en +15 ($65-69), 2025 plano en -30 ($57-62) -> flag
+    df_conf = _tablon([15.0, 16.0, 15.5, 16.3], [-30.0, -31.0, -29.8, -31.5],
+                      [65.0, 67.0, 68.5, 69.0], [57.5, 59.1, 59.3, 61.8])
+    out = mod.calcular_confound_vigencia(df_conf, {"X": 186.0})
+    assert out["X"]["FLAG"] is True and out["X"]["ETA2"] >= 0.99
+
+    # Delta varia DENTRO de cada año (señal de precio real) -> eta2 bajo, sin flag
+    df_ok = _tablon([5.0, 15.0, 25.0, 35.0], [0.0, 10.0, 20.0, 30.0],
+                    [65.0, 67.0, 68.5, 69.0], [57.5, 59.1, 59.3, 61.8])
+    out = mod.calcular_confound_vigencia(df_ok, {"X": 186.0})
+    assert out["X"]["FLAG"] is False
+
+    # Salto inmaterial (<5% del baseline) -> sin flag aunque eta2 sea alto
+    df_chico = _tablon([1.0, 1.1, 1.05, 1.08], [-1.0, -1.1, -0.9, -1.05],
+                       [65.0, 67.0, 68.5, 69.0], [57.5, 59.1, 59.3, 61.8])
+    out = mod.calcular_confound_vigencia(df_chico, {"X": 186.0})
+    assert out["X"]["FLAG"] is False
 
 
 def test_cap_outlier_por_materialidad():

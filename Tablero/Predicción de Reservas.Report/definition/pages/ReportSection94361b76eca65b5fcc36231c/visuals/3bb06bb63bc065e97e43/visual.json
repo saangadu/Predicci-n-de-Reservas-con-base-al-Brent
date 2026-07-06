@@ -53,14 +53,14 @@
                           "Entity": "Predicción"
                         }
                       },
-                      "Property": "Precio Neto Efectivo (USD/bbl)"
+                      "Property": "Precio Neto M2 (USD/bbl)"
                     }
                   },
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Predicción.Precio Neto Efectivo (USD/bbl))",
-              "nativeQueryRef": "Avg of Precio Neto Efectivo (USD/bbl)"
+              "queryRef": "Avg(Predicción.Precio Neto M2 (USD/bbl))",
+              "nativeQueryRef": "Avg of Precio Neto M2 (USD/bbl)"
             },
             {
               "field": {

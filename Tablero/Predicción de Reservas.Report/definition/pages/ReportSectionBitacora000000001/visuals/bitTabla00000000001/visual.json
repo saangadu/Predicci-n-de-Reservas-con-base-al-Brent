@@ -1,0 +1,121 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "name": "bitTabla00000000001",
+  "position": {
+    "x": 32,
+    "y": 120,
+    "z": 2000,
+    "height": 900,
+    "width": 1856,
+    "tabOrder": 2000
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Bitácora"
+                    }
+                  },
+                  "Property": "Fecha"
+                }
+              },
+              "queryRef": "Bitácora.Fecha",
+              "nativeQueryRef": "Fecha"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Bitácora"
+                    }
+                  },
+                  "Property": "Título"
+                }
+              },
+              "queryRef": "Bitácora.Título",
+              "nativeQueryRef": "Título"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Bitácora"
+                    }
+                  },
+                  "Property": "Decisión"
+                }
+              },
+              "queryRef": "Bitácora.Decisión",
+              "nativeQueryRef": "Decisión"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Bitácora"
+                    }
+                  },
+                  "Property": "Impacto"
+                }
+              },
+              "queryRef": "Bitácora.Impacto",
+              "nativeQueryRef": "Impacto"
+            }
+          ]
+        }
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "values": [
+        {
+          "properties": {
+            "wordWrap": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

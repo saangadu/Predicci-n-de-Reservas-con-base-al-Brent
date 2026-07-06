@@ -87,7 +87,8 @@ table 'Diagnóstico M1'
 				let
 				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_matriz_modelo1.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
 				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
-				    Tipos = Table.TransformColumnTypes(Prom, {{"CAMPO", type text}, {"MOTOR", type text}, {"PRECIO_ACEITE_USD_BBL", type number}, {"DELTA_ANCLADO_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"BREAKEVEN_FINANCIERO_USD_BBL", type number}, {"BREAKEVEN_OPERACIONAL_USD_BBL", type number}}, "en-US")
+				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				    Tipos = Table.TransformColumnTypes(SinBOM, {{"CAMPO", type text}, {"MOTOR", type text}, {"PRECIO_ACEITE_USD_BBL", type number}, {"DELTA_ANCLADO_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"BREAKEVEN_FINANCIERO_USD_BBL", type number}, {"BREAKEVEN_OPERACIONAL_USD_BBL", type number}}, "en-US")
 				in
 				    Tipos
 

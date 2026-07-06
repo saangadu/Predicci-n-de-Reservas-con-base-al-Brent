@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
-  "name": "981bba751ecd9bd07184",
+  "name": "1a6868a3f2e1b4c5d6e7",
   "position": {
-    "x": 976,
+    "x": 344,
     "y": 120,
-    "z": 5000,
-    "height": 496,
-    "width": 920,
-    "tabOrder": 5000
+    "z": 4000,
+    "height": 584,
+    "width": 524,
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "lineChart",
@@ -20,14 +20,14 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Puntos M2"
+                      "Entity": "Puntos M1"
                     }
                   },
-                  "Property": "Brent (USD/bbl)"
+                  "Property": "Precio Neto (USD/bbl)"
                 }
               },
-              "queryRef": "Puntos M2.Brent (USD/bbl)",
-              "nativeQueryRef": "Brent (USD/bbl)",
+              "queryRef": "Puntos M1.Precio Neto (USD/bbl)",
+              "nativeQueryRef": "Precio Neto (USD/bbl)",
               "active": true
             }
           ]
@@ -39,13 +39,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Puntos M2"
+                      "Entity": "Puntos M1"
                     }
                   },
                   "Property": "Serie"
                 }
               },
-              "queryRef": "Puntos M2.Serie",
+              "queryRef": "Puntos M1.Serie",
               "nativeQueryRef": "Serie"
             }
           ]
@@ -59,17 +59,17 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Puntos M2"
+                          "Entity": "Puntos M1"
                         }
                       },
-                      "Property": "Precio Neto (USD/bbl)"
+                      "Property": "Delta (MBPE)"
                     }
                   },
                   "Function": 3
                 }
               },
-              "queryRef": "Min(Puntos M2.Precio Neto (USD/bbl))",
-              "nativeQueryRef": "Precio Neto (USD/bbl)",
+              "queryRef": "Min(Puntos M1.Delta (MBPE))",
+              "nativeQueryRef": "Delta (MBPE)",
               "active": true
             }
           ]
@@ -104,7 +104,7 @@
             "titleText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Brent (USD/bbl)'"
+                  "Value": "'Precio Neto (USD/bbl)'"
                 }
               }
             }
@@ -131,7 +131,7 @@
             "titleText": {
               "expr": {
                 "Literal": {
-                  "Value": "'Precio Neto (USD/bbl)'"
+                  "Value": "'ΔReservas (MBPE)'"
                 }
               }
             }
@@ -178,7 +178,7 @@
             "markerSize": {
               "expr": {
                 "Literal": {
-                  "Value": "5D"
+                  "Value": "4D"
                 }
               }
             },
@@ -191,6 +191,124 @@
             }
           }
         }
+      ],
+      "xAxisReferenceLine": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "value": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "BK Operacional (USD/bbl)"
+                }
+              }
+            },
+            "lineColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#C2410C'"
+                    }
+                  }
+                }
+              }
+            },
+            "style": {
+              "expr": {
+                "Literal": {
+                  "Value": "'dashed'"
+                }
+              }
+            },
+            "displayName": {
+              "expr": {
+                "Literal": {
+                  "Value": "'BK Operacional'"
+                }
+              }
+            },
+            "dataLabelShow": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "bkope"
+          }
+        },
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "value": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "BK Financiero (USD/bbl)"
+                }
+              }
+            },
+            "lineColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#A87900'"
+                    }
+                  }
+                }
+              }
+            },
+            "style": {
+              "expr": {
+                "Literal": {
+                  "Value": "'dotted'"
+                }
+              }
+            },
+            "displayName": {
+              "expr": {
+                "Literal": {
+                  "Value": "'BK Financiero'"
+                }
+              }
+            },
+            "dataLabelShow": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "bkfin"
+          }
+        }
       ]
     },
     "visualContainerObjects": {
@@ -200,7 +318,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'M2 — Precio Neto = α+β·Brent (recta Theil-Sen + cierres HIST por año)'"
+                  "Value": "'Espacio delta — ΔReservas vs Precio Neto'"
                 }
               }
             },

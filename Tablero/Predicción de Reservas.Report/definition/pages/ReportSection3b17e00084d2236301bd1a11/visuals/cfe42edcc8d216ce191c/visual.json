@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "cfe42edcc8d216ce191c",
   "position": {
     "x": 32,
@@ -20,15 +20,33 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Diagnóstico M1"
+                      "Entity": "Puntos M1"
                     }
                   },
-                  "Property": "Precio Aceite (USD/bbl)"
+                  "Property": "Precio Neto (USD/bbl)"
                 }
               },
-              "queryRef": "Diagnóstico M1.Precio Aceite (USD/bbl)",
-              "nativeQueryRef": "Precio Aceite (USD/bbl)",
+              "queryRef": "Puntos M1.Precio Neto (USD/bbl)",
+              "nativeQueryRef": "Precio Neto (USD/bbl)",
               "active": true
+            }
+          ]
+        },
+        "Series": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Puntos M1"
+                    }
+                  },
+                  "Property": "Serie"
+                }
+              },
+              "queryRef": "Puntos M1.Serie",
+              "nativeQueryRef": "Serie"
             }
           ]
         },
@@ -41,35 +59,18 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Diagnóstico M1"
+                          "Entity": "Puntos M1"
                         }
                       },
-                      "Property": "Volumen 1P Predicho (MBPE)"
+                      "Property": "Volumen 1P (MBPE)"
                     }
                   },
-                  "Function": 4
+                  "Function": 3
                 }
               },
-              "queryRef": "Max(Diagnóstico M1.Volumen 1P Predicho (MBPE))",
-              "nativeQueryRef": "Max of Volumen 1P Predicho (MBPE)"
-            }
-          ]
-        },
-        "Series": {
-          "projections": [
-            {
-              "field": {
-                "Column": {
-                  "Expression": {
-                    "SourceRef": {
-                      "Entity": "Diagnóstico M1"
-                    }
-                  },
-                  "Property": "Motor Clave"
-                }
-              },
-              "queryRef": "Diagnóstico M1.Motor Clave",
-              "nativeQueryRef": "Motor Clave"
+              "queryRef": "Min(Puntos M1.Volumen 1P (MBPE))",
+              "nativeQueryRef": "Volumen 1P (MBPE)",
+              "active": true
             }
           ]
         }
@@ -86,10 +87,24 @@
                 }
               }
             },
+            "axisType": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Scalar'"
+                }
+              }
+            },
             "showAxisTitle": {
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            },
+            "titleText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Precio Neto (USD/bbl)'"
                 }
               }
             }
@@ -112,6 +127,13 @@
                   "Value": "true"
                 }
               }
+            },
+            "titleText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Volumen 1P (MBPE)'"
+                }
+              }
             }
           }
         }
@@ -129,7 +151,41 @@
             "position": {
               "expr": {
                 "Literal": {
-                  "Value": "'TopCenter'"
+                  "Value": "'BottomCenter'"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "lineStyles": [
+        {
+          "properties": {
+            "strokeWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "2D"
+                }
+              }
+            },
+            "showMarker": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "markerSize": {
+              "expr": {
+                "Literal": {
+                  "Value": "4D"
+                }
+              }
+            },
+            "lineChartType": {
+              "expr": {
+                "Literal": {
+                  "Value": "'linear'"
                 }
               }
             }
@@ -141,17 +197,10 @@
       "title": [
         {
           "properties": {
-            "show": {
-              "expr": {
-                "Literal": {
-                  "Value": "true"
-                }
-              }
-            },
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'M1: Volumen 1P vs Precio Aceite'"
+                  "Value": "'M1 — Volumen 1P vs Precio Neto (modelo + reales por año + ancla)'"
                 }
               }
             },
