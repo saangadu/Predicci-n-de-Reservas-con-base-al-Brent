@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "30ace97f3e933da6b084",
   "position": {
     "x": 32,
     "y": 728,
-    "z": 10000,
+    "z": 13000,
     "height": 320,
-    "width": 1224,
-    "tabOrder": 10000
+    "width": 603,
+    "tabOrder": 13000
   },
   "visual": {
     "visualType": "tableEx",
@@ -36,7 +36,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "Nivel Confianza"
@@ -45,7 +45,7 @@
                   "Function": 3
                 }
               },
-              "queryRef": "Min(Predicción.Nivel Confianza)",
+              "queryRef": "Min(Modelo Campo.Nivel Confianza)",
               "nativeQueryRef": "Min of Nivel Confianza"
             },
             {
@@ -55,7 +55,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "Motivo Confianza"
@@ -64,7 +64,7 @@
                   "Function": 3
                 }
               },
-              "queryRef": "Min(Predicción.Motivo Confianza)",
+              "queryRef": "Min(Modelo Campo.Motivo Confianza)",
               "nativeQueryRef": "Min of Motivo Confianza"
             },
             {
@@ -74,7 +74,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "MAE Rel LOO"
@@ -83,7 +83,7 @@
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Predicción.MAE Rel LOO)",
+              "queryRef": "Avg(Modelo Campo.MAE Rel LOO)",
               "nativeQueryRef": "Avg of MAE Rel LOO"
             },
             {
@@ -93,7 +93,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "Divergencia Motores (%)"
@@ -102,7 +102,7 @@
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Predicción.Divergencia Motores (%))",
+              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
               "nativeQueryRef": "Avg of Divergencia Motores (%)"
             },
             {
@@ -112,7 +112,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "M2 N Puntos"
@@ -121,7 +121,7 @@
                   "Function": 4
                 }
               },
-              "queryRef": "Max(Predicción.M2 N Puntos)",
+              "queryRef": "Max(Modelo Campo.M2 N Puntos)",
               "nativeQueryRef": "Max of M2 N Puntos"
             }
           ]

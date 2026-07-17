@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "4deb1cfd890f8e677623",
   "position": {
     "x": 1680,
-    "y": 320,
-    "z": 11000,
-    "height": 176,
+    "y": 272,
+    "z": 16000,
+    "height": 128,
     "width": 216,
-    "tabOrder": 11000
+    "tabOrder": 16000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,7 +22,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "Nivel Confianza"
@@ -31,7 +31,7 @@
                   "Function": 3
                 }
               },
-              "queryRef": "Min(Predicción.Nivel Confianza)",
+              "queryRef": "Min(Modelo Campo.Nivel Confianza)",
               "nativeQueryRef": "Min of Nivel Confianza"
             }
           ]

@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "d5ab999f7ce4bba7b6c7",
   "position": {
     "x": 1440,
-    "y": 528,
-    "z": 12000,
-    "height": 176,
+    "y": 424,
+    "z": 17000,
+    "height": 128,
     "width": 216,
-    "tabOrder": 12000
+    "tabOrder": 17000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,7 +22,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "M2 R² LOO"
@@ -31,7 +31,7 @@
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Predicción.M2 R² LOO)",
+              "queryRef": "Avg(Modelo Campo.M2 R² LOO)",
               "nativeQueryRef": "Avg of M2 R² LOO"
             }
           ]

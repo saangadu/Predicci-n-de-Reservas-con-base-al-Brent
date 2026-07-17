@@ -105,5 +105,23 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "87f8a0cf7eba94687c62",
+        "field": {
+          "Column": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "Motor"
+              }
+            },
+            "Property": "Motor"
+          }
+        },
+        "type": "Categorical"
+      }
+    ]
   }
 }

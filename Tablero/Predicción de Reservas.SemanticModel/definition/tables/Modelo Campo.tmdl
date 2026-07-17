@@ -1,0 +1,323 @@
+/// DIM de atributos del modelo por campo (grano = CAMPO × AMBIENTE, 1 fila por combinación).
+/// Tabla HOJA del esquema estrella: NO se relaciona con las tablas de hechos — se filtra por
+/// las dimensiones Campo y Ambiente (las mismas que filtran los hechos). Con un campo y un
+/// ambiente seleccionados colapsa a 1 fila (SELECTEDVALUE determinista).
+/// Fuente: dim_campo_modelo.csv (atributos que antes se repetían en cada fila de Brent).
+table 'Modelo Campo'
+	lineageTag: a1b2c3d4-0001-4001-9001-000000000001
+
+	column 'Campo Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a1b2c3d4-0002-4001-9001-000000000002
+		summarizeBy: none
+		sourceColumn: CAMPO
+
+	/// Track del pipeline: Producción o Calidad. Clave de la dimensión Ambiente.
+	column 'Ambiente Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: a1b2c3d4-0003-4001-9001-000000000003
+		summarizeBy: none
+		sourceColumn: AMBIENTE
+
+	/// 1P certificado más reciente del campo (cierre oficial A−1, carry-forward).
+	column 'Volumen 1P Baseline (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		displayFolder: 1. Volúmenes
+		lineageTag: a1b2c3d4-0004-4001-9001-000000000004
+		summarizeBy: sum
+		sourceColumn: VOLUMEN_1P_BASELINE_MBPE
+
+	/// Año del cierre oficial usado como Baseline. Puede ser anterior a 2025 en campos sin reporte reciente.
+	column 'Año Baseline'
+		dataType: int64
+		displayFolder: 1. Volúmenes
+		lineageTag: a1b2c3d4-0005-4001-9001-000000000005
+		summarizeBy: none
+		sourceColumn: AÑO_BASELINE
+
+	/// 1P certificado cierre 2025 ECP S.A. (sin filiales). NULL si el campo no tuvo cierre 2025 real.
+	column 'Cierre 2025 (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		displayFolder: 1. Volúmenes
+		lineageTag: a1b2c3d4-0006-4001-9001-000000000006
+		summarizeBy: sum
+		sourceColumn: CIERRE_2025_MBPE
+
+	/// Precio Neto ancla (M2 al Brent de referencia) donde Vol = Baseline exacto.
+	column 'Precio Ref (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: a1b2c3d4-0007-4001-9001-000000000007
+		summarizeBy: sum
+		sourceColumn: P_REF_USD_BBL
+
+	/// Piso duro realmente aplicado por el hard-zero (= BK abandono, o p_ref−1 si capado).
+	column 'Piso Efectivo (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: a1b2c3d4-0008-4001-9001-000000000008
+		summarizeBy: sum
+		sourceColumn: PISO_EFECTIVO_USD_BBL
+
+	/// Breakeven (Límite Económico: FC último año con aceite = 0; mantener reservas).
+	column 'Breakeven (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: a1b2c3d4-0009-4001-9001-000000000009
+		summarizeBy: sum
+		sourceColumn: BREAKEVEN_USD_BBL
+
+	/// Precio de Equilibrio (VPN = 0, abandono total; por debajo no hay reservas).
+	column 'Precio de Equilibrio (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: a1b2c3d4-000a-4001-9001-00000000000a
+		summarizeBy: sum
+		sourceColumn: PRECIO_EQUILIBRIO_USD_BBL
+
+	/// BK global ponderado 1P (una cifra de referencia por campo).
+	column 'Breakeven Referencia (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: a1b2c3d4-000b-4001-9001-00000000000b
+		summarizeBy: sum
+		sourceColumn: BREAKEVEN_REF_USD_BBL
+
+	column 'Precio de Equilibrio Referencia (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		displayFolder: 2. Precios
+		lineageTag: a1b2c3d4-000c-4001-9001-00000000000c
+		summarizeBy: sum
+		sourceColumn: PRECIO_EQUILIBRIO_REF_USD_BBL
+
+	/// Intercepto de la recta M2 (Aceite = α + β·Brent).
+	column Alpha
+		dataType: double
+		formatString: 0.0000
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-000d-4001-9001-00000000000d
+		summarizeBy: sum
+		sourceColumn: ALPHA
+
+	/// Sensibilidad del precio aceite al Brent (pendiente de la recta M2).
+	column Beta
+		dataType: double
+		formatString: 0.0000
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-000e-4001-9001-00000000000e
+		summarizeBy: sum
+		sourceColumn: BETA
+
+	/// THEILSEN | PROPORCIONAL | FALLBACK_BETA_PORTAFOLIO | familias s11 (DESCOMPUESTO, HUBER…).
+	column 'M2 Método'
+		dataType: string
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-000f-4001-9001-00000000000f
+		summarizeBy: none
+		sourceColumn: M2_METODO
+
+	/// True = campo sin relación Aceite~Brent propia, usa k del portafolio.
+	column 'M2 Es Fallback'
+		dataType: boolean
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0010-4001-9001-000000000010
+		summarizeBy: none
+		sourceColumn: M2_ES_FALLBACK
+
+	column 'M2 N Puntos'
+		dataType: int64
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0011-4001-9001-000000000011
+		summarizeBy: none
+		sourceColumn: M2_N_PUNTOS
+
+	column 'M2 R²'
+		dataType: double
+		formatString: 0.000
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0012-4001-9001-000000000012
+		summarizeBy: sum
+		sourceColumn: M2_R2
+
+	column 'M2 R² LOO'
+		dataType: double
+		formatString: 0.000
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0013-4001-9001-000000000013
+		summarizeBy: sum
+		sourceColumn: M2_R2_LOO
+
+	column 'M2 MAE LOO'
+		dataType: double
+		formatString: #,##0.00
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0014-4001-9001-000000000014
+		summarizeBy: sum
+		sourceColumn: M2_MAE_LOO
+
+	column 'M2 Alerta'
+		dataType: string
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0015-4001-9001-000000000015
+		summarizeBy: none
+		sourceColumn: M2_ALERTA
+
+	/// Recta M2 frágil (fallback, <5 puntos o R² LOO<0): traducción Brent→precio poco confiable.
+	column 'M2 Frágil'
+		dataType: boolean
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0016-4001-9001-000000000016
+		summarizeBy: none
+		sourceColumn: M2_FRAGIL
+
+	/// ALTA | MEDIA | BAJA | INSENSIBLE_PRECIO | SIN_MODELO.
+	column 'Nivel Confianza'
+		dataType: string
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-0017-4001-9001-000000000017
+		summarizeBy: none
+		sourceColumn: NIVEL_CONFIANZA
+
+	column 'Motivo Confianza'
+		dataType: string
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-0018-4001-9001-000000000018
+		summarizeBy: none
+		sourceColumn: MOTIVO_CONFIANZA
+
+	column 'N Real Delta'
+		dataType: int64
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-0019-4001-9001-000000000019
+		summarizeBy: none
+		sourceColumn: N_REAL_DELTA
+
+	column 'MAE Rel LOO'
+		dataType: double
+		formatString: 0.0%
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-001a-4001-9001-00000000001a
+		summarizeBy: sum
+		sourceColumn: MAE_REL_LOO
+
+	column 'Divergencia Motores (%)'
+		dataType: double
+		formatString: 0.0%
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-001b-4001-9001-00000000001b
+		summarizeBy: sum
+		sourceColumn: DIVERGENCIA_MOTORES_PCT
+
+	column 'Alerta LOO Outlier'
+		dataType: boolean
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-001c-4001-9001-00000000001c
+		summarizeBy: none
+		sourceColumn: ALERTA_LOO_OUTLIER_ISO
+
+	/// Error absoluto medio Leave-One-Year-Out (motor Isotónica), MBPE.
+	column 'MAE LOYO (MBPE)'
+		dataType: double
+		formatString: #,##0.00
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-001d-4001-9001-00000000001d
+		summarizeBy: sum
+		sourceColumn: MAE_LOYO_MBPE
+
+	/// Skill LOYO (motor Isotónica) vs predictor ingenuo.
+	column 'Skill LOYO'
+		dataType: double
+		formatString: 0.000
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-001e-4001-9001-00000000001e
+		summarizeBy: sum
+		sourceColumn: SKILL_LOYO
+
+	column 'N Vigencias LOYO'
+		dataType: int64
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-001f-4001-9001-00000000001f
+		summarizeBy: none
+		sourceColumn: N_VIGENCIAS_LOYO
+
+	/// |Delta_ref ISO| / baseline — profundidad del valle donde cae el ancla p_ref. >15% dispara alerta.
+	column 'Sesgo Recuperación'
+		dataType: double
+		formatString: 0.0%
+		displayFolder: 4. Confiabilidad
+		lineageTag: a1b2c3d4-0020-4001-9001-000000000020
+		summarizeBy: sum
+		sourceColumn: SESGO_RECUPERACION
+
+	/// ISOTONICA | PLANO_DECK | INSENSIBLE_PRECIO | SIN_MODELO.
+	column 'Tipo Modelo'
+		dataType: string
+		displayFolder: 5. Flags
+		lineageTag: a1b2c3d4-0021-4001-9001-000000000021
+		summarizeBy: none
+		sourceColumn: TIPO_MODELO
+
+	/// BK_SUPERA_PRECIO_REF (piso capado) | SIN_REANCLAJE | vacío.
+	column 'Alerta BK'
+		dataType: string
+		displayFolder: 5. Flags
+		lineageTag: a1b2c3d4-0022-4001-9001-000000000022
+		summarizeBy: none
+		sourceColumn: ALERTA_BK
+
+	column 'Confound η²'
+		dataType: double
+		formatString: 0.000
+		displayFolder: 5. Flags
+		lineageTag: a1b2c3d4-0023-4001-9001-000000000023
+		summarizeBy: sum
+		sourceColumn: CONFOUND_ETA2
+
+	/// Pendiente M1 no separable del cambio de vigencia (confound).
+	column 'Sensibilidad No Identificada'
+		dataType: boolean
+		displayFolder: 5. Flags
+		lineageTag: a1b2c3d4-0024-4001-9001-000000000024
+		summarizeBy: none
+		sourceColumn: SENSIBILIDAD_NO_IDENTIFICADA
+
+	/// Método real adoptado por el motor 'Suave' (híbridos s11/s12: Sigmoide, LinealRobusto, Plano…). El de 'Isotonica' es trivialmente Isotónica.
+	column 'Método Real Suave'
+		dataType: string
+		displayFolder: 5. Flags
+		lineageTag: a1b2c3d4-0025-4001-9001-000000000025
+		summarizeBy: none
+		sourceColumn: METODO_REAL_SUAVE
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    fCarga = (ruta as text, ambiente as text) as table =>
+				        let
+				            Origen = Csv.Document(File.Contents(ruta), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				            Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				            SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				            ConAmb = Table.AddColumn(SinBOM, "AMBIENTE", each ambiente, type text)
+				        in
+				            ConAmb,
+				    Prod = fCarga(RutaBase & "\resultados\dim_campo_modelo.csv", "Producción"),
+				    Cal = fCarga(RutaBase & "\resultados_calidad\dim_campo_modelo.csv", "Calidad"),
+				    Union = Table.Combine({Prod, Cal}),
+				    Tipos = Table.TransformColumnTypes(Union, {{"CAMPO", type text}, {"TIPO_MODELO", type text}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"AÑO_BASELINE", Int64.Type}, {"CIERRE_2025_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"PISO_EFECTIVO_USD_BBL", type number}, {"BREAKEVEN_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_USD_BBL", type number}, {"BREAKEVEN_REF_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"ALERTA_BK", type text}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"MAE_LOYO_MBPE", type number}, {"SKILL_LOYO", type number}, {"N_VIGENCIAS_LOYO", Int64.Type}, {"SESGO_RECUPERACION", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_R2", type number}, {"M2_MAE_LOO", type number}, {"M2_ALERTA", type text}, {"METODO_REAL_SUAVE", type text}, {"AMBIENTE", type text}}, "en-US")
+				in
+				    Tipos
+
+	annotation PBI_ResultType = Table

@@ -1,0 +1,207 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
+  "name": "ct8table000000000001",
+  "position": {
+    "x": 32,
+    "y": 680,
+    "z": 8000,
+    "height": 368,
+    "width": 1856,
+    "tabOrder": 8000
+  },
+  "visual": {
+    "visualType": "tableEx",
+    "query": {
+      "queryState": {
+        "Values": {
+          "projections": [
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Campo"
+                    }
+                  },
+                  "Property": "Campo"
+                }
+              },
+              "queryRef": "Campo.Campo",
+              "nativeQueryRef": "Campo"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Comparativa Tracks"
+                    }
+                  },
+                  "Property": "Baseline (MBPE)"
+                }
+              },
+              "queryRef": "Comparativa Tracks.Baseline (MBPE)",
+              "nativeQueryRef": "Baseline (MBPE)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Comparativa Tracks"
+                    }
+                  },
+                  "Property": "Nivel Prod"
+                }
+              },
+              "queryRef": "Comparativa Tracks.Nivel Prod",
+              "nativeQueryRef": "Nivel Prod"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Comparativa Tracks"
+                    }
+                  },
+                  "Property": "Nivel Cal"
+                }
+              },
+              "queryRef": "Comparativa Tracks.Nivel Cal",
+              "nativeQueryRef": "Nivel Cal"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Comparativa Tracks"
+                    }
+                  },
+                  "Property": "MAE LOYO Prod"
+                }
+              },
+              "queryRef": "Comparativa Tracks.MAE LOYO Prod",
+              "nativeQueryRef": "MAE LOYO Prod"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Comparativa Tracks"
+                    }
+                  },
+                  "Property": "MAE LOYO Cal"
+                }
+              },
+              "queryRef": "Comparativa Tracks.MAE LOYO Cal",
+              "nativeQueryRef": "MAE LOYO Cal"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Comparativa Tracks"
+                    }
+                  },
+                  "Property": "Dif Máx (MBPE)"
+                }
+              },
+              "queryRef": "Comparativa Tracks.Dif Máx (MBPE)",
+              "nativeQueryRef": "Dif Máx (MBPE)"
+            },
+            {
+              "field": {
+                "Column": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "Comparativa Tracks"
+                    }
+                  },
+                  "Property": "Mecanismo"
+                }
+              },
+              "queryRef": "Comparativa Tracks.Mecanismo",
+              "nativeQueryRef": "Mecanismo"
+            }
+          ]
+        }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Column": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "Comparativa Tracks"
+                  }
+                },
+                "Property": "Nivel Prod"
+              }
+            },
+            "direction": "Ascending"
+          }
+        ]
+      }
+    },
+    "objects": {
+      "columnHeaders": [
+        {
+          "properties": {
+            "columnAdjustment": {
+              "expr": {
+                "Literal": {
+                  "Value": "'growToFit'"
+                }
+              }
+            },
+            "autoSizeColumnWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "visualContainerObjects": {
+      "title": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "text": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Campos que explican la diferencia (mayor Dif Máx primero) — con mecanismo diagnosticado'"
+                }
+              }
+            },
+            "fontColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#1E293B'"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

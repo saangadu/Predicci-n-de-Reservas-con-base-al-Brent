@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "confCriterios000001",
   "position": {
-    "x": 1288,
+    "x": 1286,
     "y": 728,
-    "z": 11000,
+    "z": 15000,
     "height": 320,
-    "width": 600,
-    "tabOrder": 11000
+    "width": 603,
+    "tabOrder": 15000
   },
   "visual": {
     "visualType": "textbox",
@@ -159,6 +159,63 @@
                   },
                   {
                     "value": ": la pendiente de precio no es separable del cambio de deck anual (η²≥0.8, bandas de precio sin solape).",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Sesgo Recuperación",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#7C3AED"
+                    }
+                  },
+                  {
+                    "value": ": ancla p_ref cae en el valle de la última vigencia (>15% del baseline) — la curva 'recupera' nivel histórico, no precio.",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Clipped",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#0EA5E9"
+                    }
+                  },
+                  {
+                    "value": ": Brent sobre el techo de la banda del deck — isotónica saturada (out_of_bounds='clip').",
+                    "textStyle": {
+                      "fontSize": "10px",
+                      "color": "#1E293B"
+                    }
+                  }
+                ]
+              },
+              {
+                "textRuns": [
+                  {
+                    "value": "Extrapolado / BK Inconsistente",
+                    "textStyle": {
+                      "fontFamily": "Segoe UI Semibold",
+                      "fontSize": "10px",
+                      "color": "#DB2777"
+                    }
+                  },
+                  {
+                    "value": ": Brent fuera de banda histórica ±$5 / BK de abandono contradicho por la certificación vigente (piso capado).",
                     "textStyle": {
                       "fontSize": "10px",
                       "color": "#1E293B"

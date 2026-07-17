@@ -1,0 +1,79 @@
+/// DIM de auditoría de la corrida (metadata del export, 1 fila por Ambiente).
+/// Reemplaza las constantes globales que antes se repetían en cada fila de Predicción
+/// (Q Objetivo, Vigencia Base, Fecha Predicción, Brent Ref). Fuente: dim_corrida.csv.
+table Corrida
+	lineageTag: b2c3d4e5-0001-4002-9002-000000000001
+
+	/// Track del pipeline: Producción o Calidad. Clave de la dimensión Ambiente.
+	column 'Ambiente Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: b2c3d4e5-0002-4002-9002-000000000002
+		summarizeBy: none
+		sourceColumn: AMBIENTE
+
+	/// Quarter objetivo de la predicción (loop rodante: siguiente Q).
+	column 'Q Objetivo'
+		dataType: string
+		lineageTag: b2c3d4e5-0003-4002-9002-000000000003
+		summarizeBy: none
+		sourceColumn: Q_OBJETIVO
+
+	/// Última vigencia del deck usada para entrenar.
+	column 'Vigencia Base'
+		dataType: string
+		lineageTag: b2c3d4e5-0004-4002-9002-000000000004
+		summarizeBy: none
+		sourceColumn: VIGENCIA_BASE
+
+	column 'Fecha Predicción'
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		lineageTag: b2c3d4e5-0005-4002-9002-000000000005
+		summarizeBy: none
+		sourceColumn: FECHA_PREDICCION
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	/// Brent ancla (cierre oficial, ~68.64) donde Vol Predicho = Baseline exacto.
+	column 'Brent Ref (USD/bbl)'
+		dataType: double
+		formatString: $#,##0.00
+		lineageTag: b2c3d4e5-0006-4002-9002-000000000006
+		summarizeBy: none
+		sourceColumn: BRENT_REF_USD_BBL
+
+	column 'N Campos'
+		dataType: int64
+		lineageTag: b2c3d4e5-0007-4002-9002-000000000007
+		summarizeBy: none
+		sourceColumn: N_CAMPOS
+
+	/// Timestamp de generación del export (auditoría).
+	column 'Fecha Export'
+		dataType: string
+		lineageTag: b2c3d4e5-0008-4002-9002-000000000008
+		summarizeBy: none
+		sourceColumn: FECHA_EXPORT
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    fCarga = (ruta as text, ambiente as text) as table =>
+				        let
+				            Origen = Csv.Document(File.Contents(ruta), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				            Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				            SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				            ConAmb = Table.AddColumn(SinBOM, "AMBIENTE", each ambiente, type text)
+				        in
+				            ConAmb,
+				    Prod = fCarga(RutaBase & "\resultados\dim_corrida.csv", "Producción"),
+				    Cal = fCarga(RutaBase & "\resultados_calidad\dim_corrida.csv", "Calidad"),
+				    Union = Table.Combine({Prod, Cal}),
+				    Tipos = Table.TransformColumnTypes(Union, {{"Q_OBJETIVO", type text}, {"VIGENCIA_BASE", type text}, {"FECHA_PREDICCION", type date}, {"BRENT_REF_USD_BBL", type number}, {"N_CAMPOS", Int64.Type}, {"FECHA_EXPORT", type text}, {"AMBIENTE", type text}}, "en-US")
+				in
+				    Tipos
+
+	annotation PBI_ResultType = Table

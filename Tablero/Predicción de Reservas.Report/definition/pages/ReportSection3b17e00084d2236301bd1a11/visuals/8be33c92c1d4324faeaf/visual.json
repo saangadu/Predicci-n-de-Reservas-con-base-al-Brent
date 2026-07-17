@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "8be33c92c1d4324faeaf",
   "position": {
-    "x": 541.732283464567,
-    "y": 15.118110236220474,
-    "z": 11001,
-    "height": 95.748031496062993,
-    "width": 287.244094488189,
-    "tabOrder": 11001
+    "x": 1183.6065573770493,
+    "y": 0,
+    "z": 17000,
+    "height": 96.721311475409834,
+    "width": 288.52459016393442,
+    "tabOrder": 17000
   },
   "visual": {
     "visualType": "slicer",
@@ -37,49 +37,7 @@
     "objects": {
       "general": [
         {
-          "properties": {
-            "filter": {
-              "filter": {
-                "Version": 2,
-                "From": [
-                  {
-                    "Name": "c",
-                    "Entity": "Campo",
-                    "Type": 0
-                  }
-                ],
-                "Where": [
-                  {
-                    "Condition": {
-                      "In": {
-                        "Expressions": [
-                          {
-                            "Column": {
-                              "Expression": {
-                                "SourceRef": {
-                                  "Source": "c"
-                                }
-                              },
-                              "Property": "Campo"
-                            }
-                          }
-                        ],
-                        "Values": [
-                          [
-                            {
-                              "Literal": {
-                                "Value": "'CASTILLA'"
-                              }
-                            }
-                          ]
-                        ]
-                      }
-                    }
-                  }
-                ]
-              }
-            }
-          }
+          "properties": {}
         }
       ],
       "data": [
@@ -157,23 +115,5 @@
       "fieldChanges": true,
       "filterChanges": true
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "d443b97686aa7b99e293",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Campo"
-              }
-            },
-            "Property": "Campo"
-          }
-        },
-        "type": "Categorical"
-      }
-    ]
   }
 }

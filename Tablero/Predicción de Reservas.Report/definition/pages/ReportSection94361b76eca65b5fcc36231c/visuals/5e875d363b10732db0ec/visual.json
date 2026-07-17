@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "5e875d363b10732db0ec",
   "position": {
     "x": 32,
     "y": 32,
-    "z": 2000,
+    "z": 0,
     "height": 64,
-    "width": 1856,
-    "tabOrder": 2000
+    "width": 1600,
+    "tabOrder": 0
   },
   "visual": {
     "visualType": "cardVisual",
@@ -163,5 +163,23 @@
         }
       ]
     }
+  },
+  "filterConfig": {
+    "filters": [
+      {
+        "name": "92a16f441a640518d1c2",
+        "field": {
+          "Measure": {
+            "Expression": {
+              "SourceRef": {
+                "Entity": "_Medidas"
+              }
+            },
+            "Property": "Título Campo"
+          }
+        },
+        "type": "Advanced"
+      }
+    ]
   }
 }

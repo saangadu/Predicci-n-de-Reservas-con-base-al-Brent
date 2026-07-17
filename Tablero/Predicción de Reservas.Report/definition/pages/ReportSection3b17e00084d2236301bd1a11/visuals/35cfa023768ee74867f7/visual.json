@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "35cfa023768ee74867f7",
   "position": {
     "x": 32,
     "y": 656,
-    "z": 6000,
+    "z": 7000,
     "height": 170,
     "width": 288,
-    "tabOrder": 6000
+    "tabOrder": 7000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,7 +22,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Diagnóstico M2"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "Alpha"
@@ -31,7 +31,7 @@
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Diagnóstico M2.Alpha)",
+              "queryRef": "Avg(Modelo Campo.Alpha)",
               "nativeQueryRef": "Avg of Alpha"
             }
           ]

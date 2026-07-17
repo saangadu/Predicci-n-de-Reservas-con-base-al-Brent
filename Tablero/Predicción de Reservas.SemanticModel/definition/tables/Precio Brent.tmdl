@@ -1,4 +1,6 @@
-/// Dimensión de precio: rejilla Brent del escenario (eje del slicer). Derivada de la tabla de hechos para mantenerse sincronizada con la rejilla precalculada.
+/// DIM de precio CONECTADA: rejilla Brent del escenario (slicer). Filtra Predicción y Diagnóstico M2.
+/// Su gemela 'Eje Brent' es el mismo grid pero DESCONECTADO (patrón disconnected-axis para curvas
+/// completas vía TREATAS) — la duplicación es deliberada, no eliminar ninguna de las dos.
 table 'Precio Brent'
 	lineageTag: 29ee31bc-5d7e-4f61-b0a7-bc373196b182
 

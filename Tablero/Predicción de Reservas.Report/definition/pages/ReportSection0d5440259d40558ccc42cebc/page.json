@@ -4,12 +4,5 @@
   "displayName": "Resumen Ejecutivo",
   "displayOption": "FitToPage",
   "height": 1080,
-  "width": 1920,
-  "visualInteractions": [
-    {
-      "source": "69b06a6bfc895f68fc22",
-      "target": "d9770629ef288e193315",
-      "type": "NoFilter"
-    }
-  ]
+  "width": 1920
 }

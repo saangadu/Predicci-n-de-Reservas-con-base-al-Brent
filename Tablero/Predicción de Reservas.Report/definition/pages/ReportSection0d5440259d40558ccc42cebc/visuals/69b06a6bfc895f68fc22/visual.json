@@ -4,10 +4,10 @@
   "position": {
     "x": 1288,
     "y": 32,
-    "z": 3000,
+    "z": 2000,
     "height": 80,
-    "width": 600,
-    "tabOrder": 3000
+    "width": 336,
+    "tabOrder": 2000
   },
   "visual": {
     "visualType": "slicer",
@@ -101,7 +101,7 @@
                           [
                             {
                               "Literal": {
-                                "Value": "76D"
+                                "Value": "85D"
                               }
                             }
                           ]
@@ -157,23 +157,5 @@
       "fieldChanges": true,
       "filterChanges": true
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "efda2c9e7a82043feea7",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Precio Brent"
-              }
-            },
-            "Property": "Brent (USD/bbl)"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

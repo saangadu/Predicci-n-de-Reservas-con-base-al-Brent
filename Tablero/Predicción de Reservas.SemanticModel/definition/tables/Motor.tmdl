@@ -1,4 +1,7 @@
-/// Dimensión de motor M1: Isotonica (primario) vs Suave (validación PCHIP).
+/// Dimensión de ROL de motor M1: 'Isotonica' = primario, 'Suave' = validación. Son roles, no
+/// métodos: desde s11/s12 el método real por campo puede ser un híbrido (Sigmoide,
+/// LinealRobusto, Plano…) — ver 'Modelo Campo'[Método Real Suave] y la medida [Método del Motor].
+/// NO renombrar los valores: están fijados en DAX (KEEPFILTERS) y filtros de visuales.
 table Motor
 	lineageTag: 10f976b1-774b-427a-af2d-7b7e710b75ac
 
@@ -27,7 +30,7 @@ table Motor
 		mode: import
 		source =
 				let
-				    Fuente = Table.FromRecords({[MOTOR="Isotonica", DESCRIPCION="Primario — isotónica, monótona por construcción", ORDEN=1], [MOTOR="Suave", DESCRIPCION="Validación — PCHIP suavizado", ORDEN=2]}),
+				    Fuente = Table.FromRecords({[MOTOR="Isotonica", DESCRIPCION="Primario — isotónica, monótona por construcción", ORDEN=1], [MOTOR="Suave", DESCRIPCION="Validación — híbrido: mejor método por campo (s11/s12)", ORDEN=2]}),
 				    Tipos = Table.TransformColumnTypes(Fuente, {{"MOTOR", type text}, {"DESCRIPCION", type text}, {"ORDEN", Int64.Type}})
 				in
 				    Tipos

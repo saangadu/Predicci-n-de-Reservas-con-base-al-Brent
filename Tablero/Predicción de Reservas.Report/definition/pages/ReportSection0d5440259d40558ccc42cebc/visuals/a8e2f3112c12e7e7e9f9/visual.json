@@ -1,12 +1,12 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "a8e2f3112c12e7e7e9f9",
   "position": {
-    "x": 408,
+    "x": 658,
     "y": 120,
     "z": 5000,
     "height": 152,
-    "width": 352,
+    "width": 289,
     "tabOrder": 5000
   },
   "visual": {
@@ -23,11 +23,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Delta vs Base (MBPE)"
+                  "Property": "Δ vs Cierre 2025 (MBPE)"
                 }
               },
-              "queryRef": "_Medidas.Delta vs Base (MBPE)",
-              "nativeQueryRef": "Delta vs Base (MBPE)"
+              "queryRef": "_Medidas.Δ vs Cierre 2025 (MBPE)",
+              "nativeQueryRef": "Δ vs Cierre 2025 (MBPE)"
             }
           ]
         }

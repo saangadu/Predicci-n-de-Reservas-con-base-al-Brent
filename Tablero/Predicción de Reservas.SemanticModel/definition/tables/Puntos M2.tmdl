@@ -46,14 +46,31 @@ table 'Puntos M2'
 		summarizeBy: none
 		sourceColumn: PRECIO_NETO_USD_BBL
 
+	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
+	column 'Ambiente Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005505
+		summarizeBy: none
+		sourceColumn: AMBIENTE
+
 	partition Partition = m
 		mode: import
 		source =
 				let
-				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_puntos_m2.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
-				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
-				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
-				    Tipos = Table.TransformColumnTypes(SinBOM, {{"IDX", Int64.Type}, {"CAMPO", type text}, {"SERIE", type text}, {"AÑO", Int64.Type}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_USD_BBL", type number}}, "en-US")
+				    fCarga = (ruta as text, ambiente as text) as table =>
+				        let
+				            Origen = Csv.Document(File.Contents(ruta), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				            Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				            SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				            ConAmb = Table.AddColumn(SinBOM, "AMBIENTE", each ambiente, type text)
+				        in
+				            ConAmb,
+				    Prod = fCarga(RutaBase & "\resultados\output_puntos_m2.csv", "Producción"),
+				    Cal = fCarga(RutaBase & "\resultados_calidad\output_puntos_m2.csv", "Calidad"),
+				    Union = Table.Combine({Prod, Cal}),
+				    Tipos = Table.TransformColumnTypes(Union, {{"IDX", Int64.Type}, {"CAMPO", type text}, {"SERIE", type text}, {"AÑO", Int64.Type}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_USD_BBL", type number}, {"AMBIENTE", type text}}, "en-US")
 				in
 				    Tipos
 

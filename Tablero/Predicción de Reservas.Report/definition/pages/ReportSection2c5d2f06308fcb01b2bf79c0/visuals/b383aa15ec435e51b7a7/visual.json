@@ -4,10 +4,10 @@
   "position": {
     "x": 32,
     "y": 296,
-    "z": 8000,
+    "z": 11000,
     "height": 408,
     "width": 920,
-    "tabOrder": 8000
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "barChart",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Predicción"
+                      "Entity": "Modelo Campo"
                     }
                   },
                   "Property": "Nivel Confianza"
                 }
               },
-              "queryRef": "Predicción.Nivel Confianza",
+              "queryRef": "Modelo Campo.Nivel Confianza",
               "nativeQueryRef": "Nivel Confianza",
               "active": true
             }
@@ -42,11 +42,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Vol 1P Predicho"
+                  "Property": "Vol 1P Baseline"
                 }
               },
-              "queryRef": "_Medidas.Vol 1P Predicho",
-              "nativeQueryRef": "Vol 1P Predicho"
+              "queryRef": "_Medidas.Vol 1P Baseline",
+              "nativeQueryRef": "Vol 1P Baseline"
             }
           ]
         }
@@ -61,7 +61,7 @@
                     "Entity": "_Medidas"
                   }
                 },
-                "Property": "Vol 1P Predicho"
+                "Property": "Vol 1P Baseline"
               }
             },
             "direction": "Descending"

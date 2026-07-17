@@ -1,5 +1,5 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "befb894ca1efc040f214",
   "position": {
     "x": 32,
@@ -93,11 +93,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Colchón vs BK Operacional (USD)"
+                  "Property": "Colchón vs Precio de Equilibrio (USD)"
                 }
               },
-              "queryRef": "_Medidas.Colchón vs BK Operacional (USD)",
-              "nativeQueryRef": "Colchón vs BK Operacional (USD)"
+              "queryRef": "_Medidas.Colchón vs Precio de Equilibrio (USD)",
+              "nativeQueryRef": "Colchón vs Precio de Equilibrio (USD)"
             },
             {
               "field": {
@@ -107,14 +107,31 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Colchón vs BK Financiero (USD)"
+                  "Property": "Colchón vs Breakeven (USD)"
                 }
               },
-              "queryRef": "_Medidas.Colchón vs BK Financiero (USD)",
-              "nativeQueryRef": "Colchón vs BK Financiero (USD)"
+              "queryRef": "_Medidas.Colchón vs Breakeven (USD)",
+              "nativeQueryRef": "Colchón vs Breakeven (USD)"
             }
           ]
         }
+      },
+      "sortDefinition": {
+        "sort": [
+          {
+            "field": {
+              "Measure": {
+                "Expression": {
+                  "SourceRef": {
+                    "Entity": "_Medidas"
+                  }
+                },
+                "Property": "Vol 1P Baseline"
+              }
+            },
+            "direction": "Descending"
+          }
+        ]
       }
     },
     "objects": {

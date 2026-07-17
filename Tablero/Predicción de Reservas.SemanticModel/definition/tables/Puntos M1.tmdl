@@ -16,7 +16,7 @@ table 'Puntos M1'
 		summarizeBy: none
 		sourceColumn: CAMPO
 
-	/// Serie: Isotónica / Suave (modelo), Real {año} (dato observado), Ancla (punto actual).
+	/// Serie con detalle: Isotónica / Suave (modelo), Sensibilidad {año}-Q{n} (dato observado por trimestre), Baseline {año} (cierre oficial anual), Ancla (punto actual). Ver 'Serie Color' para la agrupación por año usada en leyenda/color.
 	column Serie
 		dataType: string
 		lineageTag: 3c1a9f42-6b28-4e71-9d05-1a7e4c8f2b13
@@ -54,14 +54,38 @@ table 'Puntos M1'
 		summarizeBy: sum
 		sourceColumn: VOLUMEN_MBPE
 
+	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
+	column 'Ambiente Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005504
+		summarizeBy: none
+		sourceColumn: AMBIENTE
+
+	/// Agrupa Serie por año para leyenda/color (ej. 'Sensibilidad 2024' agrupa Q1-Q4; Serie conserva el detalle del Q).
+	column 'Serie Color'
+		dataType: string
+		lineageTag: 17b4d33e-5604-4412-b7c2-419e2b0aeec5
+		summarizeBy: none
+		sourceColumn: SERIE_COLOR
+
 	partition Partition = m
 		mode: import
 		source =
 				let
-				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados\output_puntos_m1.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
-				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
-				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
-				    Tipos = Table.TransformColumnTypes(SinBOM, {{"IDX", Int64.Type}, {"CAMPO", type text}, {"SERIE", type text}, {"AÑO", Int64.Type}, {"PRECIO_NETO_USD_BBL", type number}, {"DELTA_MBPE", type number}, {"VOLUMEN_MBPE", type number}}, "en-US")
+				    fCarga = (ruta as text, ambiente as text) as table =>
+				        let
+				            Origen = Csv.Document(File.Contents(ruta), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				            Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				            SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				            ConAmb = Table.AddColumn(SinBOM, "AMBIENTE", each ambiente, type text)
+				        in
+				            ConAmb,
+				    Prod = fCarga(RutaBase & "\resultados\output_puntos_m1.csv", "Producción"),
+				    Cal = fCarga(RutaBase & "\resultados_calidad\output_puntos_m1.csv", "Calidad"),
+				    Union = Table.Combine({Prod, Cal}),
+				    Tipos = Table.TransformColumnTypes(Union, {{"IDX", Int64.Type}, {"CAMPO", type text}, {"SERIE", type text}, {"SERIE_COLOR", type text}, {"AÑO", Int64.Type}, {"PRECIO_NETO_USD_BBL", type number}, {"DELTA_MBPE", type number}, {"VOLUMEN_MBPE", type number}, {"AMBIENTE", type text}}, "en-US")
 				in
 				    Tipos
 

@@ -1,0 +1,27 @@
+/// Eje de precio DESCONECTADO (sin relación con Predicción). Espeja la rejilla Brent de 'Precio Brent'
+/// pero, al no filtrar la tabla de hechos, permite dibujar la curva completa mientras el slicer marca
+/// el escenario. Se usa como categoría (eje X) del gráfico "1P del portafolio vs Brent".
+/// NO crear relaciones sobre esta tabla: las medidas *Curva la reconectan vía TREATAS.
+table 'Eje Brent'
+	lineageTag: 1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+
+	/// Rejilla Brent para el eje de la curva. Mismos valores que 'Precio Brent'[Brent (USD/bbl)].
+	column 'Brent (USD/bbl)'
+		dataType: double
+		isKey
+		formatString: $#,##0.00
+		lineageTag: 2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e
+		summarizeBy: none
+		sourceColumn: Brent (USD/bbl)
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Fuente = Table.Distinct(Table.SelectColumns(#"Predicción", {"BRENT_USD_BBL"})),
+				    Ren = Table.RenameColumns(Fuente, {{"BRENT_USD_BBL", "Brent (USD/bbl)"}}),
+				    Orden = Table.Sort(Ren, {{"Brent (USD/bbl)", Order.Ascending}}),
+				    Tipos = Table.TransformColumnTypes(Orden, {{"Brent (USD/bbl)", type number}})
+				in
+				    Tipos
+

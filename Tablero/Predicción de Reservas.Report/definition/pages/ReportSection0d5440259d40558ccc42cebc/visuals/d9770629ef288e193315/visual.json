@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "d9770629ef288e193315",
   "position": {
     "x": 32,
     "y": 296,
-    "z": 9000,
+    "z": 11000,
     "height": 496,
     "width": 1072,
-    "tabOrder": 9000
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "lineChart",
@@ -20,13 +20,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Precio Brent"
+                      "Entity": "Eje Brent"
                     }
                   },
                   "Property": "Brent (USD/bbl)"
                 }
               },
-              "queryRef": "Precio Brent.Brent (USD/bbl)",
+              "queryRef": "Eje Brent.Brent (USD/bbl)",
               "nativeQueryRef": "Brent (USD/bbl)",
               "active": true
             }
@@ -42,17 +42,164 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Vol 1P Predicho"
+                  "Property": "Vol 1P Curva"
                 }
               },
-              "queryRef": "_Medidas.Vol 1P Predicho",
-              "nativeQueryRef": "Vol 1P Predicho"
+              "queryRef": "_Medidas.Vol 1P Curva",
+              "nativeQueryRef": "Vol 1P Curva"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Vol P10 Curva"
+                }
+              },
+              "queryRef": "_Medidas.Vol P10 Curva",
+              "nativeQueryRef": "Vol P10 Curva"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Vol P90 Curva"
+                }
+              },
+              "queryRef": "_Medidas.Vol P90 Curva",
+              "nativeQueryRef": "Vol P90 Curva"
             }
           ]
         }
       }
     },
     "objects": {
+      "lineStyles": [
+        {
+          "properties": {
+            "strokeColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#009639'"
+                    }
+                  }
+                }
+              }
+            },
+            "strokeWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "3D"
+                }
+              }
+            },
+            "lineStyle": {
+              "expr": {
+                "Literal": {
+                  "Value": "'solid'"
+                }
+              }
+            },
+            "showMarker": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "_Medidas.Vol 1P Curva"
+          }
+        },
+        {
+          "properties": {
+            "strokeColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#7BC298'"
+                    }
+                  }
+                }
+              }
+            },
+            "strokeWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "1.5D"
+                }
+              }
+            },
+            "lineStyle": {
+              "expr": {
+                "Literal": {
+                  "Value": "'dashed'"
+                }
+              }
+            },
+            "showMarker": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "_Medidas.Vol P10 Curva"
+          }
+        },
+        {
+          "properties": {
+            "strokeColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#7BC298'"
+                    }
+                  }
+                }
+              }
+            },
+            "strokeWidth": {
+              "expr": {
+                "Literal": {
+                  "Value": "1.5D"
+                }
+              }
+            },
+            "lineStyle": {
+              "expr": {
+                "Literal": {
+                  "Value": "'dashed'"
+                }
+              }
+            },
+            "showMarker": {
+              "expr": {
+                "Literal": {
+                  "Value": "false"
+                }
+              }
+            }
+          },
+          "selector": {
+            "metadata": "_Medidas.Vol P90 Curva"
+          }
+        }
+      ],
       "categoryAxis": [
         {
           "properties": {
@@ -89,11 +236,84 @@
                   "Value": "true"
                 }
               }
+            },
+            "start": {
+              "expr": {
+                "Literal": {
+                  "Value": "1300D"
+                }
+              }
+            },
+            "end": {
+              "expr": {
+                "Literal": {
+                  "Value": "1810D"
+                }
+              }
             }
           }
         }
       ],
-      "y1AxisReferenceLine": [],
+      "y1AxisReferenceLine": [
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "value": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Vol 1P Predicho"
+                }
+              }
+            },
+            "lineColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#64748B'"
+                    }
+                  }
+                }
+              }
+            },
+            "style": {
+              "expr": {
+                "Literal": {
+                  "Value": "'dotted'"
+                }
+              }
+            },
+            "displayName": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Reservas @ escenario'"
+                }
+              }
+            },
+            "dataLabelShow": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "Reservas Escenario"
+          }
+        }
+      ],
       "xAxisReferenceLine": [
         {
           "properties": {
@@ -132,7 +352,7 @@
             "displayName": {
               "expr": {
                 "Literal": {
-                  "Value": "'Brent Ref'"
+                  "Value": "'Ancla 68.01 (Q1 2026)'"
                 }
               }
             },
@@ -146,6 +366,64 @@
           },
           "selector": {
             "id": "Brent Ref"
+          }
+        },
+        {
+          "properties": {
+            "show": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            },
+            "value": {
+              "expr": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Brent Escenario (USD/bbl)"
+                }
+              }
+            },
+            "lineColor": {
+              "solid": {
+                "color": {
+                  "expr": {
+                    "Literal": {
+                      "Value": "'#009639'"
+                    }
+                  }
+                }
+              }
+            },
+            "style": {
+              "expr": {
+                "Literal": {
+                  "Value": "'solid'"
+                }
+              }
+            },
+            "displayName": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Escenario seleccionado'"
+                }
+              }
+            },
+            "dataLabelShow": {
+              "expr": {
+                "Literal": {
+                  "Value": "true"
+                }
+              }
+            }
+          },
+          "selector": {
+            "id": "Escenario"
           }
         }
       ]
@@ -164,7 +442,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'1P del portafolio vs Brent (USD/bbl)'"
+                  "Value": "'1P del portafolio vs Brent'"
                 }
               }
             },
@@ -176,6 +454,19 @@
                       "Value": "'#1E293B'"
                     }
                   }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background": [
+        {
+          "properties": {
+            "transparency": {
+              "expr": {
+                "Literal": {
+                  "Value": "100D"
                 }
               }
             }

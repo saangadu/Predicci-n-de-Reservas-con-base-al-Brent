@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "ca4180136e7012947e21",
   "position": {
     "x": 1600,
     "y": 656,
-    "z": 11000,
+    "z": 16000,
     "height": 170,
     "width": 288,
-    "tabOrder": 11000
+    "tabOrder": 16000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,16 +22,16 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Diagnóstico M2"
+                          "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "N Puntos"
+                      "Property": "M2 N Puntos"
                     }
                   },
                   "Function": 4
                 }
               },
-              "queryRef": "Max(Diagnóstico M2.N Puntos)",
+              "queryRef": "Max(Modelo Campo.M2 N Puntos)",
               "nativeQueryRef": "Max of N Puntos"
             }
           ]

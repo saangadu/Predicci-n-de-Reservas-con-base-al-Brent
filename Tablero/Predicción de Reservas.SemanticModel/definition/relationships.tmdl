@@ -26,11 +26,6 @@ relationship Motor_M1
 	fromColumn: 'Diagnóstico M1'.'Motor Clave'
 	toColumn: Motor.Motor
 
-relationship 1b7f0fcd-44e3-47ce-a683-8e8862d003e1
-	joinOnDateBehavior: datePartOnly
-	fromColumn: Predicción.'Fecha Predicción'
-	toColumn: LocalDateTable_e3e48511-2aa2-4383-8a0b-665cc6c3dbf9.Date
-
 relationship Campo_PuntosM1
 	fromColumn: 'Puntos M1'.CAMPO
 	toColumn: Campo.Campo
@@ -43,4 +38,40 @@ relationship 475a7b9b-03fe-450e-b6fb-2f358acfb139
 	joinOnDateBehavior: datePartOnly
 	fromColumn: Bitácora.Fecha
 	toColumn: LocalDateTable_50dd2b90-876b-4779-bf7e-1025dce39798.Date
+
+relationship Ambiente_Prediccion
+	fromColumn: Predicción.'Ambiente Clave'
+	toColumn: Ambiente.Ambiente
+
+relationship Ambiente_M1
+	fromColumn: 'Diagnóstico M1'.'Ambiente Clave'
+	toColumn: Ambiente.Ambiente
+
+relationship Ambiente_M2
+	fromColumn: 'Diagnóstico M2'.'Ambiente Clave'
+	toColumn: Ambiente.Ambiente
+
+relationship Ambiente_PuntosM1
+	fromColumn: 'Puntos M1'.'Ambiente Clave'
+	toColumn: Ambiente.Ambiente
+
+relationship Ambiente_PuntosM2
+	fromColumn: 'Puntos M2'.'Ambiente Clave'
+	toColumn: Ambiente.Ambiente
+
+relationship Campo_Comparativa
+	fromColumn: 'Comparativa Tracks'.'Campo Clave'
+	toColumn: Campo.Campo
+
+relationship Campo_ModeloCampo
+	fromColumn: 'Modelo Campo'.'Campo Clave'
+	toColumn: Campo.Campo
+
+relationship Ambiente_ModeloCampo
+	fromColumn: 'Modelo Campo'.'Ambiente Clave'
+	toColumn: Ambiente.Ambiente
+
+relationship Ambiente_Corrida
+	fromColumn: Corrida.'Ambiente Clave'
+	toColumn: Ambiente.Ambiente
 

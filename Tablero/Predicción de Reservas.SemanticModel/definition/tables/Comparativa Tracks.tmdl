@@ -1,0 +1,153 @@
+/// Tabla puente Producción↔Calidad por campo (resultados_calidad/comparativa_tracks.csv). Emparejamiento directo de niveles de confianza, MAE LOYO, sesgo y volúmenes a Brent 60/70/80 entre ambos tracks. Se relaciona solo con Campo; NO con Ambiente ni Precio Brent (sus volúmenes son cortes fijos). Alimenta la página "Producción vs Calidad".
+table 'Comparativa Tracks'
+	lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e00
+
+	column 'Campo Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e01
+		summarizeBy: none
+		sourceColumn: CAMPO
+
+	column 'Baseline (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e02
+		summarizeBy: sum
+		sourceColumn: BASELINE_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Nivel de confianza en el track Producción.
+	column 'Nivel Prod'
+		dataType: string
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e03
+		summarizeBy: none
+		sourceColumn: NIVEL_PROD
+
+	/// Nivel de confianza en el track Calidad.
+	column 'Nivel Cal'
+		dataType: string
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e04
+		summarizeBy: none
+		sourceColumn: NIVEL_CAL
+
+	column 'MAE LOYO Prod'
+		dataType: double
+		formatString: #,##0.00
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e05
+		summarizeBy: sum
+		sourceColumn: MAE_LOYO_PROD
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'MAE LOYO Cal'
+		dataType: double
+		formatString: #,##0.00
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e06
+		summarizeBy: sum
+		sourceColumn: MAE_LOYO_CAL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Sesgo Prod'
+		dataType: double
+		formatString: #,##0.00
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e07
+		summarizeBy: sum
+		sourceColumn: SESGO_PROD
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Sesgo Cal'
+		dataType: double
+		formatString: #,##0.00
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e08
+		summarizeBy: sum
+		sourceColumn: SESGO_CAL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Vol60 Prod'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e09
+		summarizeBy: sum
+		sourceColumn: VOL60_PROD
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Vol60 Cal'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e0a
+		summarizeBy: sum
+		sourceColumn: VOL60_CAL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Vol70 Prod'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e0b
+		summarizeBy: sum
+		sourceColumn: VOL70_PROD
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Vol70 Cal'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e0c
+		summarizeBy: sum
+		sourceColumn: VOL70_CAL
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Vol80 Prod'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e0d
+		summarizeBy: sum
+		sourceColumn: VOL80_PROD
+
+		annotation SummarizationSetBy = Automatic
+
+	column 'Vol80 Cal'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e0e
+		summarizeBy: sum
+		sourceColumn: VOL80_CAL
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Diferencia máxima de volumen entre tracks a lo largo de Brent 60/70/80 (MBPE). Métrica de severidad de la divergencia.
+	column 'Dif Máx (MBPE)'
+		dataType: double
+		formatString: #,##0.0
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e0f
+		summarizeBy: sum
+		sourceColumn: DIF_MAX_MBPE
+
+		annotation SummarizationSetBy = Automatic
+
+	/// Mecanismo que explica la diferencia (perfil de salida, re-anclaje confound, selección de método, etc.), diagnosticado por el pipeline.
+	column Mecanismo
+		dataType: string
+		lineageTag: 0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e10
+		summarizeBy: none
+		sourceColumn: MECANISMO
+
+	partition Partition = m
+		mode: import
+		source =
+				let
+				    Origen = Csv.Document(File.Contents(RutaBase & "\resultados_calidad\comparativa_tracks.csv"), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+				    Prom = Table.PromoteHeaders(Origen, [PromoteAllScalars=true]),
+				    SinBOM = Table.TransformColumnNames(Prom, each Text.Replace(_, Character.FromNumber(65279), "")),
+				    Tipos = Table.TransformColumnTypes(SinBOM, {{"CAMPO", type text}, {"BASELINE_MBPE", type number}, {"NIVEL_PROD", type text}, {"NIVEL_CAL", type text}, {"MAE_LOYO_PROD", type number}, {"MAE_LOYO_CAL", type number}, {"SESGO_PROD", type number}, {"SESGO_CAL", type number}, {"VOL60_PROD", type number}, {"VOL60_CAL", type number}, {"VOL70_PROD", type number}, {"VOL70_CAL", type number}, {"VOL80_PROD", type number}, {"VOL80_CAL", type number}, {"DIF_MAX_MBPE", type number}, {"MECANISMO", type text}}, "en-US")
+				in
+				    Tipos
+

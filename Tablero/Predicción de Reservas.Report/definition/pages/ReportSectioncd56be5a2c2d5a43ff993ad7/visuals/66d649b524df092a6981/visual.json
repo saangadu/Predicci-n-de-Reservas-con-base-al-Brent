@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "66d649b524df092a6981",
   "position": {
-    "x": 976,
-    "y": 120,
+    "x": 1280,
+    "y": 128,
     "z": 6000,
-    "height": 496,
-    "width": 920,
+    "height": 488,
+    "width": 608,
     "tabOrder": 6000
   },
   "visual": {
@@ -39,13 +39,13 @@
                 "Column": {
                   "Expression": {
                     "SourceRef": {
-                      "Entity": "Predicción"
+                      "Entity": "Modelo Campo"
                     }
                   },
                   "Property": "Nivel Confianza"
                 }
               },
-              "queryRef": "Predicción.Nivel Confianza",
+              "queryRef": "Modelo Campo.Nivel Confianza",
               "nativeQueryRef": "Nivel Confianza"
             }
           ]
@@ -78,11 +78,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Colchón vs BK Operacional (USD)"
+                  "Property": "Colchón vs Precio de Equilibrio (USD)"
                 }
               },
-              "queryRef": "_Medidas.Colchón vs BK Operacional (USD)",
-              "nativeQueryRef": "Colchón vs BK Operacional (USD)",
+              "queryRef": "_Medidas.Colchón vs Precio de Equilibrio (USD)",
+              "nativeQueryRef": "Colchón vs Precio de Equilibrio (USD)",
               "active": true
             }
           ]
@@ -102,6 +102,52 @@
               },
               "queryRef": "_Medidas.Vol 1P Predicho",
               "nativeQueryRef": "Vol 1P Predicho"
+            }
+          ]
+        },
+        "Tooltips": {
+          "projections": [
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Brent Escenario (USD/bbl)"
+                }
+              },
+              "queryRef": "_Medidas.Brent Escenario (USD/bbl)",
+              "nativeQueryRef": "Brent Escenario (USD/bbl)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Línea Precio de Equilibrio (USD/bbl)"
+                }
+              },
+              "queryRef": "_Medidas.Línea Precio de Equilibrio (USD/bbl)",
+              "nativeQueryRef": "Línea Precio de Equilibrio (USD/bbl)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
+                  "Property": "Colchón vs Breakeven (USD)"
+                }
+              },
+              "queryRef": "_Medidas.Colchón vs Breakeven (USD)",
+              "nativeQueryRef": "Colchón vs Breakeven (USD)"
             }
           ]
         }
@@ -124,6 +170,13 @@
                   "Value": "true"
                 }
               }
+            },
+            "titleText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Colchón = Precio Neto del campo − Precio de Equilibrio (USD/bbl)'"
+                }
+              }
             }
           }
         }
@@ -142,6 +195,13 @@
               "expr": {
                 "Literal": {
                   "Value": "true"
+                }
+              }
+            },
+            "titleText": {
+              "expr": {
+                "Literal": {
+                  "Value": "'Reservas 1P predichas (MBPE)'"
                 }
               }
             }
@@ -206,7 +266,7 @@
             "displayName": {
               "expr": {
                 "Literal": {
-                  "Value": "'Breakeven'"
+                  "Value": "'Precio de Equilibrio (colchón = 0)'"
                 }
               }
             },
@@ -238,7 +298,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Volumen vs colchón de breakeven (riesgo)'"
+                  "Value": "'Colchón de precio sobre el Precio de Equilibrio (izquierda de 0 = en riesgo)'"
                 }
               }
             },

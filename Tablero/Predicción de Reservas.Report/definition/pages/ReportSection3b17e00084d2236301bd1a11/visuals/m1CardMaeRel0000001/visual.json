@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "m1CardMaeRel0000001",
   "position": {
     "x": 496,
     "y": 866,
-    "z": 6600,
+    "z": 9000,
     "height": 170,
     "width": 448,
-    "tabOrder": 6600
+    "tabOrder": 9000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,7 +22,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "MAE Rel LOO"
@@ -31,7 +31,7 @@
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Predicción.MAE Rel LOO)",
+              "queryRef": "Avg(Modelo Campo.MAE Rel LOO)",
               "nativeQueryRef": "Avg of MAE Rel LOO"
             }
           ]

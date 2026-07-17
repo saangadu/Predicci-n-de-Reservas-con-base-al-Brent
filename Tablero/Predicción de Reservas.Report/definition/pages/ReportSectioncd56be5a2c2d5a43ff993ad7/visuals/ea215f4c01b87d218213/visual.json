@@ -3,11 +3,11 @@
   "name": "ea215f4c01b87d218213",
   "position": {
     "x": 32,
-    "y": 120,
-    "z": 5000,
-    "height": 496,
-    "width": 920,
-    "tabOrder": 5000
+    "y": 128,
+    "z": 4000,
+    "height": 488,
+    "width": 608,
+    "tabOrder": 4000
   },
   "visual": {
     "visualType": "barChart",
@@ -42,11 +42,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Elasticidad Local (MBPE/USD)"
+                  "Property": "Δ Vol por +5 USD (MBPE)"
                 }
               },
-              "queryRef": "_Medidas.Elasticidad Local (MBPE/USD)",
-              "nativeQueryRef": "Elasticidad Local (MBPE/USD)"
+              "queryRef": "_Medidas.Δ Vol por +5 USD (MBPE)",
+              "nativeQueryRef": "Δ Vol por +5 USD (MBPE)"
             }
           ]
         }
@@ -61,7 +61,7 @@
                     "Entity": "_Medidas"
                   }
                 },
-                "Property": "Elasticidad Local (MBPE/USD)"
+                "Property": "Δ Vol por +5 USD (MBPE)"
               }
             },
             "direction": "Descending"
@@ -129,7 +129,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Sensibilidad al precio por campo (MBPE/USD)'"
+                  "Value": "'Impacto: Δ MBPE por +5 USD de Brent'"
                 }
               }
             },

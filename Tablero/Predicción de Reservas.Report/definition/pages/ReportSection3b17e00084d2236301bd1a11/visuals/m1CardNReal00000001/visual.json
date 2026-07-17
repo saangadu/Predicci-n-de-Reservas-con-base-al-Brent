@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "m1CardNReal00000001",
   "position": {
     "x": 32,
     "y": 866,
-    "z": 6500,
+    "z": 8000,
     "height": 170,
     "width": 448,
-    "tabOrder": 6500
+    "tabOrder": 8000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,7 +22,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "N Real Delta"
@@ -31,7 +31,7 @@
                   "Function": 3
                 }
               },
-              "queryRef": "Min(Predicción.N Real Delta)",
+              "queryRef": "Min(Modelo Campo.N Real Delta)",
               "nativeQueryRef": "N Real Delta"
             }
           ]

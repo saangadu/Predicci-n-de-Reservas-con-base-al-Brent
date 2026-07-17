@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "m1CardNivel00000001",
   "position": {
     "x": 1424,
     "y": 866,
-    "z": 6800,
+    "z": 11000,
     "height": 170,
     "width": 448,
-    "tabOrder": 6800
+    "tabOrder": 11000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,7 +22,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "Nivel Confianza"
@@ -31,7 +31,7 @@
                   "Function": 3
                 }
               },
-              "queryRef": "Min(Predicción.Nivel Confianza)",
+              "queryRef": "Min(Modelo Campo.Nivel Confianza)",
               "nativeQueryRef": "Min of Nivel Confianza"
             }
           ]

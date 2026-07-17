@@ -4,10 +4,10 @@
   "position": {
     "x": 1128,
     "y": 296,
-    "z": 10000,
+    "z": 12000,
     "height": 496,
     "width": 760,
-    "tabOrder": 10000
+    "tabOrder": 12000
   },
   "visual": {
     "visualType": "barChart",
@@ -148,37 +148,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "9ef24a8a742f52743be2",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Campo"
-              }
-            },
-            "Property": "Campo"
-          }
-        },
-        "type": "Categorical"
-      },
-      {
-        "name": "c1d70a42fb0911fdd204",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "_Medidas"
-              }
-            },
-            "Property": "Delta vs Base (MBPE)"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

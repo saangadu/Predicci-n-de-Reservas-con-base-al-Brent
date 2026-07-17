@@ -1,13 +1,13 @@
 {
-  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.9.0/schema.json",
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "m1CardDiverg0000001",
   "position": {
     "x": 960,
     "y": 866,
-    "z": 6700,
+    "z": 10000,
     "height": 170,
     "width": 448,
-    "tabOrder": 6700
+    "tabOrder": 10000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -22,7 +22,7 @@
                     "Column": {
                       "Expression": {
                         "SourceRef": {
-                          "Entity": "Predicción"
+                          "Entity": "Modelo Campo"
                         }
                       },
                       "Property": "Divergencia Motores (%)"
@@ -31,7 +31,7 @@
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Predicción.Divergencia Motores (%))",
+              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
               "nativeQueryRef": "Avg of Divergencia Motores (%)"
             }
           ]
