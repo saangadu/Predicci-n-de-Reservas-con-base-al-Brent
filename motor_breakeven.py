@@ -187,6 +187,99 @@ def leer_hoja(ws, cols: dict) -> dict | None:
     return datos
 
 
+# ── Combinación multi-FC (directriz §4bis.3, 2026-07-11) ────────────────────────
+
+def combinar_hojas(ds: list[dict]) -> dict:
+    """
+    Combina los datos de N hojas FC (misma clase de reserva) de componentes físicos de
+    un mismo campo UNIFICADO en UN solo flujo de caja, alineado por AÑO CALENDARIO.
+
+    POR QUÉ: los componentes certifican juntos (doctrina Agregación v3) → son un solo
+    negocio económico. Calcular el breakeven de cada componente y quedarse con uno
+    (bug de primera fila) o promediarlos NO da el breakeven del campo combinado: la
+    raíz de una suma de flujos no es el promedio de las raíces.
+
+    Reglas de combinación:
+      SUMA         : ACEITE_VTS_NETO, GAS_VTS_NETO, GLP_NETO, OPEX, CAPEX, ABANDONO,
+                     OTROS_ING, _abandono_total.
+      EQUIVALENTE  : el ingreso de gas se preserva EXACTO vía
+                     PRECIO_GAS_comb = Σ(BGᵢ·BPᵢ·BQᵢ)/Σ(BGᵢ) con PODER_CALOR=1
+                     (el producto de promedios ≠ promedio de productos). Igual GLP:
+                     PRECIO_GLP_comb = Σ(BIᵢ·BSᵢ)/Σ(BIᵢ).
+      RECALCULA    : _ult (última fila con OPEX≠0) y _ult_oil sobre el combinado.
+
+    Los años activos (fila ≤ _ult) de cada componente deben tener AÑO válido (>0);
+    de lo contrario la alineación calendario es imposible → error duro, nunca silencio.
+    """
+    if not ds:
+        raise ValueError("combinar_hojas: lista vacía.")
+    if len(ds) == 1:
+        return ds[0]
+
+    # Años activos por componente (validación: sin años inválidos dentro del horizonte)
+    anios_union = set()
+    for d in ds:
+        ult = d["_ult"]
+        if ult < 0:
+            continue
+        anios_comp = d["ANIO"][:ult + 1]
+        if np.any(anios_comp <= 0):
+            raise ValueError("combinar_hojas: fila activa sin AÑO válido — "
+                             "alineación por año calendario imposible.")
+        anios_union.update(int(a) for a in anios_comp)
+    if not anios_union:
+        raise ValueError("combinar_hojas: ningún componente con horizonte activo.")
+
+    anios = np.array(sorted(anios_union), dtype=float)
+    n = len(anios)
+    idx_de_anio = {int(a): i for i, a in enumerate(anios)}
+
+    SUMAR = ["ACEITE_VTS_NETO", "GAS_VTS_NETO", "GLP_NETO",
+             "OPEX", "CAPEX", "ABANDONO", "OTROS_ING"]
+    comb = {k: np.zeros(n) for k in SUMAR}
+    ing_gas = np.zeros(n)   # Σ BGᵢ·BPᵢ·BQᵢ por año (para el precio equivalente)
+    ing_glp = np.zeros(n)   # Σ BIᵢ·BSᵢ por año
+    abandono_total = 0.0
+
+    for d in ds:
+        ult = d["_ult"]
+        abandono_total += float(d.get("_abandono_total", 0.0))
+        if ult < 0:
+            continue
+        for i in range(ult + 1):
+            j = idx_de_anio[int(d["ANIO"][i])]
+            for k in SUMAR:
+                if k in d:   # ABANDONO por fila puede faltar (el total va en _abandono_total)
+                    comb[k][j] += float(d[k][i])
+            ing_gas[j] += float(d["GAS_VTS_NETO"][i] * d["PODER_CALOR"][i]
+                                * d["PRECIO_GAS"][i])
+            ing_glp[j] += float(d["GLP_NETO"][i] * d["PRECIO_GLP"][i])
+
+    # Precios equivalentes que preservan el ingreso combinado exacto
+    with np.errstate(divide="ignore", invalid="ignore"):
+        precio_gas = np.where(comb["GAS_VTS_NETO"] > 0,
+                              ing_gas / comb["GAS_VTS_NETO"], 0.0)
+        precio_glp = np.where(comb["GLP_NETO"] > 0,
+                              ing_glp / comb["GLP_NETO"], 0.0)
+
+    comb["PODER_CALOR"] = np.where(comb["GAS_VTS_NETO"] > 0, 1.0, 0.0)
+    comb["PRECIO_GAS"]  = precio_gas
+    comb["PRECIO_GLP"]  = precio_glp
+    # PRECIO_ACEITE solo se usa como gate de "hay reservas" en leer_hoja; aquí basta
+    # un marcador no-cero en los años con aceite.
+    comb["PRECIO_ACEITE"] = np.where(comb["ACEITE_VTS_NETO"] > 0, 1.0, 0.0)
+    comb["ANIO"] = anios
+
+    nz = np.nonzero(comb["OPEX"])[0]
+    comb["_ult"] = int(nz.max()) if nz.size else -1
+    ult = comb["_ult"]
+    nz_oil = (np.nonzero(comb["ACEITE_VTS_NETO"][:ult + 1])[0]
+              if ult >= 0 else np.array([], dtype=int))
+    comb["_ult_oil"] = int(nz_oil.max()) if nz_oil.size else -1
+    comb["_abandono_total"] = abandono_total
+    return comb
+
+
 # ── Núcleo: cadena de flujo de caja (reproduce las fórmulas EK..EV del VBA) ──────
 
 def _cadena(precio: float, d: dict) -> tuple[float, float]:
@@ -245,6 +338,11 @@ def _raiz(funcion, brent_insensible: bool = False) -> tuple[float, str]:
     brent_insensible=True: si no hay cruce, devuelve BRENT_INSENSITIVE en vez de
     SIN_RAIZ_*. Indica que el campo no depende del precio Brent (p.ej. dominado por
     ingresos de gas con precio fijo), no que el solver haya fallado.
+
+    Raíz de borde (2026-07-11, directriz §4bis.4): una raíz pegada al borde inferior
+    del bracket (≤ lo + 0.01) significa que el objetivo es ≥ 0 a cualquier precio
+    positivo — el precio de equilibrio económico verdadero es 0, no un artefacto del
+    bracket numérico. Se devuelve (0.0, "OK_SIEMPRE_RENTABLE") para que sea visible.
     """
     lo, hi = BRACKET
     try:
@@ -260,9 +358,12 @@ def _raiz(funcion, brent_insensible: bool = False) -> tuple[float, str]:
             return np.nan, "BRENT_INSENSITIVE"
         return np.nan, "SIN_RAIZ_RENTABLE" if flo > 0 else "SIN_RAIZ_NO_RENTABLE"
     try:
-        return float(brentq(funcion, lo, hi, xtol=1e-4)), "OK"
+        raiz = float(brentq(funcion, lo, hi, xtol=1e-4))
     except (ValueError, RuntimeError):
         return np.nan, "NO_CONVERGE"
+    if raiz <= lo + 0.01:
+        return 0.0, "OK_SIEMPRE_RENTABLE"
+    return raiz, "OK"
 
 
 def breakeven_financiero(d: dict) -> tuple[float, str]:
@@ -287,10 +388,65 @@ def breakeven_operacional(d: dict) -> tuple[float, str]:
     return _raiz(lambda p: _cadena(p, d)[1])
 
 
+# ── Perfil de salida volumétrico (directriz §4bis.6, track Calidad) ──────────────
+
+PERFIL_PERCENTILES = (10, 25, 50, 75, 90)
+
+
+def perfil_salida(d: dict, percentiles=PERFIL_PERCENTILES) -> dict:
+    """Precio al que muere el X% del volumen de aceite de la clase (perfil de salida).
+
+    Reemplaza el acantilado de clase (un solo BK del año marginal) por la curva
+    acumulada "% del volumen que deja de ser económico" vs precio. Cada AÑO del FC
+    tiene su propio precio de quiebre:
+        BK_año = (opex + capex − ingreso_gas − ingreso_glp) / aceite_año
+    Al bajar el precio, los años mueren del más caro (cola depletada) al más barato.
+    BK_Pxx = precio al que el xx% acumulado del volumen ya no es económico.
+
+    Cero datos nuevos: usa el MISMO FC certificado que el breakeven (auditoría s6).
+    Retorna {} si el campo no tiene aceite (sin perfil de precio posible).
+    """
+    ult = d.get("_ult", -1)
+    if ult < 0 or d.get("_ult_oil", -1) < 0:
+        return {}
+    s = slice(0, ult + 1)
+    aceite  = d["ACEITE_VTS_NETO"][s]
+    opex    = (d["OPEX"][s] + d["OTROS_ING"][s]) * (1 - SENSIBILIDAD_OPEX)
+    capex   = d["CAPEX"][s]
+    ing_gas = d["GAS_VTS_NETO"][s] * d["PODER_CALOR"][s] * d["PRECIO_GAS"][s]
+    ing_glp = d["GLP_NETO"][s] * d["PRECIO_GLP"][s]
+
+    mask = aceite > 0
+    if not np.any(mask):
+        return {}
+    with np.errstate(divide="ignore", invalid="ignore"):
+        bk = (opex[mask] + capex[mask] - ing_gas[mask] - ing_glp[mask]) / aceite[mask]
+    # Año con ingreso no-aceite ≥ costos → rentable a cualquier precio (nunca sale por
+    # precio); su umbral de salida es 0, no negativo.
+    bk = np.maximum(bk, 0.0)
+    vol = aceite[mask]
+
+    orden   = np.argsort(-bk)              # el año más caro muere primero (precio alto)
+    bk_ord  = bk[orden]
+    frac    = np.cumsum(vol[orden]) / vol.sum()
+
+    out = {}
+    for pct in percentiles:
+        j = int(np.searchsorted(frac, pct / 100.0))
+        j = min(j, len(bk_ord) - 1)
+        out[f"BK_P{pct}"] = float(bk_ord[j])
+    return out
+
+
 # ── Procesamiento de archivos / carpetas ────────────────────────────────────────
 
-def procesar_fc(ruta: Path) -> list[dict]:
-    """Procesa un FC (un campo) → una fila por clase de reserva presente."""
+def procesar_fc(ruta: Path, retener_datos: bool = False) -> list[dict]:
+    """Procesa un FC (un campo) → una fila por clase de reserva presente.
+
+    retener_datos=True: cada fila lleva la clave privada "_DATOS" con los arrays de la
+    hoja (o None si SIN_RESERVAS) para que el runner pueda combinar componentes
+    multi-FC de un UNIFICADO (combinar_hojas) sin releer los Excel. El runner debe
+    descartar "_DATOS" antes de persistir."""
     ruta = Path(ruta)
     crudo, campo = campo_desde_nombre(ruta.name)
     vigencia = vigencia_desde_nombre(ruta.name)
@@ -304,14 +460,23 @@ def procesar_fc(ruta: Path) -> list[dict]:
         cols = resolver_columnas(offset)
         d = leer_hoja(ws, cols)
         if d is None or d["_ult"] < 0:
-            filas.append(_fila(ruta.name, campo, vigencia, hoja, np.nan, np.nan,
-                               "SIN_RESERVAS", "SIN_RESERVAS"))
+            fila = _fila(ruta.name, campo, vigencia, hoja, np.nan, np.nan,
+                         "SIN_RESERVAS", "SIN_RESERVAS")
+            if retener_datos:
+                fila["_DATOS"] = None
+            filas.append(fila)
             continue
         fin, msg_fin = breakeven_financiero(d)
         ope, msg_ope = breakeven_operacional(d)
-        filas.append(_fila(ruta.name, campo, vigencia, hoja, fin, ope, msg_fin, msg_ope))
+        fila = _fila(ruta.name, campo, vigencia, hoja, fin, ope, msg_fin, msg_ope)
+        if retener_datos:
+            fila["_DATOS"] = d
+        filas.append(fila)
     wb.close()
     return filas
+
+
+MENSAJES_OK = {"OK", "OK_SIEMPRE_RENTABLE"}   # raíz válida (borde inferior = equilibrio 0)
 
 
 def _fila(archivo, campo, vigencia, clase, fin, ope, msg_fin, msg_ope) -> dict:
@@ -327,7 +492,7 @@ def _fila(archivo, campo, vigencia, clase, fin, ope, msg_fin, msg_ope) -> dict:
         "BREAKEVEN_OPERACIONAL_USD_BBL":  ope,
         "MENSAJE_FIN":                    msg_fin,
         "MENSAJE_OPE":                    msg_ope,
-        "SOLVER_S1_FALLO":                msg_ope != "OK",   # compat con leer_breakeven
+        "SOLVER_S1_FALLO":                msg_ope not in MENSAJES_OK,   # compat con leer_breakeven
         "BRENT_INSENSITIVE":              es_insensible,
     }
 

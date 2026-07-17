@@ -7,9 +7,13 @@ Granularidad: CAMPO x AÑO x ESCENARIO.
 Re-arquitectura 2026-06-04 (ver docs/MAESTRO.md §6):
   - VIGENCIA: año (BASE) o quarter del deck (CONSOLIDADO_YYYY_Qq).
   - ES_BASELINE: True para filas de serie historica oficial (ESCENARIO=BASE).
-  - BASELINE_1P_VIGENCIA_MBPE: reservas OFICIAL del mismo CAMPO×AÑO (ancla de nivel).
-  - DELTA_SENS_MBPE: ΔReservas = SENSIBILIDAD − BASELINE. Cancela saltos de nivel entre
-    vigencias (deplecion, revisiones, Monetizacion por Regalias 2026). Target del modelo.
+  - CHECKPOINT_1P_MBPE: cierre OFICIAL del MISMO año A (referencia/auditoría del confound).
+  - BASELINE_1P_MBPE: cierre OFICIAL del año ANTERIOR (A−1). La Sensibilidad del deck se
+    construye sobre el último libro certificado DISPONIBLE al armar el deck = cierre A−1
+    (hallazgo 2026-07-09, validado vs Hoja1 del Consolidado; MAESTRO §10).
+  - DELTA_SENS_MBPE: ΔReservas = SENSIBILIDAD − BASELINE_1P_MBPE (cierre A−1). Target del
+    modelo. Restar el cierre A (semántica pre-2026-07-09) inyectaba el salto de
+    recertificación A−1→A en el target = el confound de vigencia.
   - NIVEL_DEFINICIONAL: flag para quiebres definicionales (ej. 2026_REGALIAS).
   - VIGENCIA_BREAKEVEN: cierre FC del que viene el breakeven ("2024", "2025", ...).
     Fuente primaria: breakeven_resultados.parquet (generado por 05_breakeven.py).
@@ -30,18 +34,30 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from homologacion import Homologador, reporte_homologacion
+from homologacion import Homologador, reporte_homologacion, normalizar_base
+from track import sufijo_track
 
 warnings.filterwarnings("ignore", category=UserWarning)
 
 # ── Rutas ──────────────────────────────────────────────────────────────────────
+_SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR = Path(__file__).parent
 RAW      = BASE_DIR / "datos" / "raw"
-STAGING  = BASE_DIR / "datos" / "staging"
+STAGING  = BASE_DIR / "datos" / f"staging{_SUF}"
+RESULTADOS = BASE_DIR / f"resultados{_SUF}"
 STAGING.mkdir(parents=True, exist_ok=True)
+RESULTADOS.mkdir(parents=True, exist_ok=True)
+
+# Coherencia BK↔deck (directriz DIRECTRIZ_ESCALERA_DECK.md §2): tolerancias del flag
+# de revisión de Finanzas. NO altera curvas; solo marca campos donde el deck real
+# contradice el umbral del breakeven.
+BK_COHERENCIA_MARGEN_USD   = 2.0    # margen sobre BK_ANCLA_FIN para "libro vivo bajo el BK"
+BK_COHERENCIA_DELTA_FRAC   = 0.05   # delta > −5%·baseline = el libro sigue vivo
+BK_COHERENCIA_BANDA_USD    = 5.0    # "precipicio pegado a la banda": banda a <$5 del BK
+BK_COHERENCIA_BASELINE_MIN = 5.0    # materialidad: micro-campos no van a revisión Finanzas
 
 HIST_1P     = RAW / "HIST 1P.xlsx"
-CONSOLIDADO = RAW / "Consolidado Bases de Datos Pronostico de Precios.xlsx"
+CONSOLIDADO = RAW / "Consolidado Bases de Datos.xlsx"   # renombrado por el usuario 2026-07-09
 
 # Fase 1: universo completo (todos los campos Incluir=Si del Consolidado).
 # Para volver a modo piloto, descomentar la línea siguiente:
@@ -81,6 +97,25 @@ def _homologar_columna(df: pd.DataFrame, col_raw: str, origen: str = "") -> pd.D
     return df
 
 
+def _prom_ponderado(valores: pd.Series, pesos: pd.Series) -> float:
+    """Promedio ponderado por 'pesos' (volumen) ignorando NaN en 'valores'.
+    Sin peso válido (todo NaN/0) → promedio simple; todo valor NaN → NaN.
+
+    Agregación v3 (2026-07-09): al fusionar componentes físicos de un UNIFICADO
+    (APIAY+GAVAN+GUATIQUIA, LISAMA+NUTRIA+TESORO, CHICHIMENE+CHICHIMENE SW) los
+    volúmenes se SUMAN pero los precios/descuentos deben ponderarse por el volumen
+    de cada componente — un promedio simple sobredimensiona los campos pequeños.
+    """
+    m = valores.notna()
+    if not m.any():
+        return np.nan
+    w = pesos.where(m).fillna(0.0)
+    sw = float(w.sum())
+    if sw > 0:
+        return float((valores.fillna(0.0) * w).sum() / sw)
+    return float(valores[m].mean())
+
+
 # ── Lectores de fuente ──────────────────────────────────────────────────────────
 
 def leer_brent_oficial() -> pd.DataFrame:
@@ -95,10 +130,15 @@ def leer_brent_oficial() -> pd.DataFrame:
     return out.dropna(subset=["AÑO"])
 
 
-def leer_hist1p_reservas() -> pd.DataFrame:
+def leer_hist1p_reservas() -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Lee HIST 1P / Reservas (MBPE). Trae columna CAMPO granular directa.
     Decimales con coma ("186,04") → float.
+
+    Retorna (df_agregado, pesos):
+      df_agregado — CAMPO(UNIFICADO)×AÑO con volúmenes SUMADOS de sus componentes.
+      pesos       — CAMPO_ORIGEN_RAW×AÑO con RAW_NORM y 1P por componente, para
+                    ponderar los precios de HIST (misma clave que la hoja Precio Net).
     """
     df = pd.read_excel(HIST_1P, sheet_name="Reservas (MBPE)", engine="openpyxl", dtype=str)
     df.columns = [str(c).strip().upper() for c in df.columns]
@@ -120,36 +160,48 @@ def leer_hist1p_reservas() -> pd.DataFrame:
         df = df[df["CAMPO"].isin(CAMPOS_PILOTO)]
     df = df.dropna(subset=["AÑO", "CAMPO"]).copy()
 
-    cols = ["CAMPO", "AÑO", "PDP", "PNP", "PND", "1P", "PROD"]
+    cols = ["CAMPO", "CAMPO_ORIGEN_RAW", "AÑO", "PDP", "PNP", "PND", "1P", "PROD"]
     cols = [c for c in cols if c in df.columns]
     df = df[cols].rename(columns={
         "PDP": "VOLUMEN_PDP_MBPE", "PNP": "VOLUMEN_PNP_MBPE",
         "PND": "VOLUMEN_PND_MBPE", "1P":  "VOLUMEN_1P_OFICIAL_MBPE",
         "PROD": "PRODUCCION_MBPE",
     })
+    vol_cols = [c for c in ["VOLUMEN_PDP_MBPE", "VOLUMEN_PNP_MBPE", "VOLUMEN_PND_MBPE",
+                            "VOLUMEN_1P_OFICIAL_MBPE", "PRODUCCION_MBPE"] if c in df.columns]
 
-    # Merge CAMPO×AÑO post-homologacion (UNIFICADO, 2026-06-12): las variantes
-    # renombradas (LLANITO/LLANITO UNIFICADO, QUIFA SUROESTE/QUIFA) son la MISMA
-    # entidad — una fila puede traer el volumen y la otra estar vacia el año del
-    # cambio de nombre. Se combina columna a columna con el primer valor no-nulo
-    # (NUNCA se suma); en conflicto de valores gana el mayor 1P y se reporta.
-    n0 = len(df)
-    conflicto = (df.dropna(subset=["VOLUMEN_1P_OFICIAL_MBPE"])
-                   .groupby(["CAMPO", "AÑO"])["VOLUMEN_1P_OFICIAL_MBPE"]
-                   .nunique() > 1)
-    if conflicto.any():
-        print(f"      [WARN] {int(conflicto.sum())} CAMPO×AÑO con volumenes 1P "
-              f"distintos duplicados — se conserva el mayor: "
-              f"{list(conflicto[conflicto].index[:5])}")
+    # Agregacion v3 (2026-07-09): un UNIFICADO agrupa CAMPOS FISICOS distintos que se
+    # certifican juntos (APIAY=APIAY+APIAY ESTE+GAVAN+GUATIQUIA; LISAMA=LISAMA+NUTRIA+
+    # TESORO; CHICHIMENE+CHICHIMENE SW tras la fusion en DIM). Sus reservas SON barriles
+    # aditivos -> SE SUMAN. El coalesce .first() anterior conservaba solo el componente
+    # mayor y botaba el resto: la serie quedaba truncada y saltaba de forma artificial
+    # al año en que la fuente ya reporta la fila unificada -> confound de vigencia FALSO
+    # (APIAY 2020=4.98 coalesce vs 9.69 suma -> salto ficticio a 10.27 en 2021).
+    # Paso A: colapsar duplicados EXACTOS del MISMO componente (RAW×AÑO) con el mayor
+    #         valor no-nulo — cubre el renombre historico (una fila trae el dato del año
+    #         del cambio de nombre, la otra viene vacia). NUNCA suma un componente consigo.
     df = (df.sort_values("VOLUMEN_1P_OFICIAL_MBPE", ascending=False, na_position="last")
-            .groupby(["CAMPO", "AÑO"], as_index=False).first())
-    if n0 - len(df) > 0:
-        print(f"      [INFO] {n0 - len(df)} filas CAMPO×AÑO combinadas "
-              f"(renombres historicos / duplicados de fuente)")
-    return df
+            .groupby(["CAMPO", "CAMPO_ORIGEN_RAW", "AÑO"], as_index=False).first())
+
+    # Pesos por componente para ponderar los precios de HIST (clave = nombre crudo tal
+    # como aparece tambien en la hoja Precio Net, normalizado).
+    pesos = df[["CAMPO_ORIGEN_RAW", "AÑO", "VOLUMEN_1P_OFICIAL_MBPE"]].copy()
+    pesos["RAW_NORM"] = pesos["CAMPO_ORIGEN_RAW"].apply(normalizar_base)
+    pesos = pesos.rename(columns={"VOLUMEN_1P_OFICIAL_MBPE": "PESO_1P"})
+
+    # Paso B: SUMAR los componentes fisicos distintos del mismo UNIFICADO×AÑO.
+    # min_count=1: todo-NaN -> NaN (ausencia real), no 0.
+    n_comp = df.groupby(["CAMPO", "AÑO"])["CAMPO_ORIGEN_RAW"].nunique()
+    multi = n_comp[n_comp > 1]
+    df = df.groupby(["CAMPO", "AÑO"], as_index=False)[vol_cols].sum(min_count=1)
+    if len(multi) > 0:
+        campos_sum = sorted(multi.index.get_level_values("CAMPO").unique())
+        print(f"      [INFO] {len(multi)} CAMPO×AÑO con >1 componente fisico SUMADOS "
+              f"(agregacion v3): {campos_sum[:8]}{'...' if len(campos_sum) > 8 else ''}")
+    return df, pesos
 
 
-def leer_hist1p_precio(df_brent_of: pd.DataFrame) -> pd.DataFrame:
+def leer_hist1p_precio(df_brent_of: pd.DataFrame, pesos: pd.DataFrame = None) -> pd.DataFrame:
     """
     Lee HIST 1P / 'Precio Net ' (espacio final).
 
@@ -210,14 +262,37 @@ def leer_hist1p_precio(df_brent_of: pd.DataFrame) -> pd.DataFrame:
         print(f"      [INFO] {n_fail} filas con identidad violada -> ALERTA=IDENTIDAD_PRECIO")
     df["ALERTA_PRECIO"] = np.where(ident > TOL_IDENTIDAD, "IDENTIDAD_PRECIO", "")
 
-    df = df[["CAMPO", "AÑO", "BRENT_FLAT_USD_BBL",
+    df = df[["CAMPO", "CAMPO_ORIGEN_RAW", "AÑO", "BRENT_FLAT_USD_BBL",
              "DESCUENTO_CALIDAD_USD_BBL", "DESCUENTO_TRANSPORTE_USD_BBL",
              "PRECIO_NETO_USD_BBL", "ALERTA_PRECIO"]].copy()
-    # Merge CAMPO×AÑO post-homologacion (UNIFICADO, 2026-06-12): combinar columna
-    # a columna con el primer valor no-nulo (una variante renombrada puede traer
-    # el neto y la otra los descuentos del mismo año). NUNCA sumar.
-    df = (df.sort_values("PRECIO_NETO_USD_BBL", na_position="last")
-            .groupby(["CAMPO", "AÑO"], as_index=False).first())
+
+    # Agregacion v3 (2026-07-09): al fusionar componentes fisicos de un UNIFICADO, el
+    # precio neto y los descuentos se ponderan por el volumen 1P de cada componente
+    # (pesos de leer_hist1p_reservas). Sin pesos (o sin match) -> promedio simple.
+    # BRENT_FLAT es oficial por año (igual para todos los componentes): se conserva.
+    df["RAW_NORM"] = df["CAMPO_ORIGEN_RAW"].apply(normalizar_base)
+    if pesos is not None and not pesos.empty:
+        df = df.merge(pesos[["RAW_NORM", "AÑO", "PESO_1P"]],
+                      on=["RAW_NORM", "AÑO"], how="left")
+    else:
+        df["PESO_1P"] = np.nan
+
+    def _agg_precio(g: pd.DataFrame) -> pd.Series:
+        w = g["PESO_1P"]
+        out = {
+            "BRENT_FLAT_USD_BBL": (g["BRENT_FLAT_USD_BBL"].dropna().iloc[0]
+                                   if g["BRENT_FLAT_USD_BBL"].notna().any() else np.nan),
+            "PRECIO_NETO_USD_BBL":         _prom_ponderado(g["PRECIO_NETO_USD_BBL"], w),
+            "DESCUENTO_CALIDAD_USD_BBL":   _prom_ponderado(g["DESCUENTO_CALIDAD_USD_BBL"], w),
+            "DESCUENTO_TRANSPORTE_USD_BBL":_prom_ponderado(g["DESCUENTO_TRANSPORTE_USD_BBL"], w),
+            "ALERTA_PRECIO": "|".join(dict.fromkeys(
+                p for p in g["ALERTA_PRECIO"].fillna("").astype(str) if p and p != "nan")),
+        }
+        return pd.Series(out)
+
+    df = (df.groupby(["CAMPO", "AÑO"])
+            .apply(_agg_precio, include_groups=False)
+            .reset_index())
     return df
 
 
@@ -345,14 +420,32 @@ def leer_consolidado() -> pd.DataFrame:
     if out.empty:
         return out
 
-    # Merge CAMPO×ESCENARIO (UNIFICADO, 2026-06-12): variantes renombradas pueden
-    # traer curvas complementarias (una con reservas, otra con precio). Se combina
-    # con el primer valor no-nulo priorizando la curva con mayor volumen. NUNCA sumar.
-    out["_orden"] = out["VOLUMEN_1P_SENSIBILIDAD_MBPE"].fillna(-1)
-    out = (out.sort_values("_orden", ascending=False)
-              .groupby(["CAMPO", "ESCENARIO"], as_index=False).first()
-              .drop(columns=["_orden"])
-              .reset_index(drop=True))
+    # Agregacion v3 (2026-07-09): CAMPO×ESCENARIO. Los componentes fisicos de un
+    # UNIFICADO (CHICHIMENE+CHICHIMENE SW tras la fusion en DIM) SUMAN su sensibilidad
+    # de reservas; el precio neto y descuentos se ponderan por esa sensibilidad. Para
+    # campos con un solo componente el resultado es identico al coalesce previo.
+    def _agg_cons(g: pd.DataFrame) -> pd.Series:
+        res = g["VOLUMEN_1P_SENSIBILIDAD_MBPE"]
+        w = res.where(res > 0)
+        out_g = {
+            "CAMPO_ORIGEN_RAW": g["CAMPO_ORIGEN_RAW"].iloc[0],
+            "HOMOLOG_FLAG":     g["HOMOLOG_FLAG"].iloc[0],
+            "AÑO":              g["AÑO"].iloc[0],
+            "VIGENCIA":         g["VIGENCIA"].iloc[0],
+            "BRENT_FLAT_USD_BBL": (g["BRENT_FLAT_USD_BBL"].dropna().iloc[0]
+                                   if g["BRENT_FLAT_USD_BBL"].notna().any() else np.nan),
+            "DESCUENTO_CALIDAD_USD_BBL":    _prom_ponderado(g["DESCUENTO_CALIDAD_USD_BBL"], w),
+            "DESCUENTO_TRANSPORTE_USD_BBL": _prom_ponderado(g["DESCUENTO_TRANSPORTE_USD_BBL"], w),
+            "PRECIO_NETO_USD_BBL":          _prom_ponderado(g["PRECIO_NETO_USD_BBL"], w),
+            "VOLUMEN_1P_SENSIBILIDAD_MBPE": res.sum(min_count=1),
+            "ALERTA": "|".join(dict.fromkeys(
+                p for p in g["ALERTA"].fillna("").astype(str) if p and p != "nan")),
+        }
+        return pd.Series(out_g)
+
+    out = (out.groupby(["CAMPO", "ESCENARIO"])
+              .apply(_agg_cons, include_groups=False)
+              .reset_index())
 
     # Alerta calidad de datos (2026-06-11): el diferencial implicito (neto − brent
     # del deck) debe ser estable entre quarters consecutivos del mismo campo. Un
@@ -382,19 +475,26 @@ def leer_consolidado() -> pd.DataFrame:
 
 def _swap_breakeven_labels(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Convencion finanzas (validada con el equipo financiero, 2026-06-09):
-      FINANCIERO = piso SUPERIOR (delta=0; limite economico de PNP/PND).
-      OPERACIONAL = piso INFERIOR (abandono; mata PDP+PNP+PND).
-    El motor (motor_breakeven.py) los calcula al reves: su "financiero" es
-    NPV=0 (mas bajo) y su "operacional" es FC del ultimo año con aceite (mas
-    alto). Se revierten las etiquetas aqui, en la frontera de lectura, sin
-    tocar el motor ni sus tests golden (tests/test_05_breakeven.py).
+    Frontera de nombres MOTOR -> EQUIPO (renombre 2026-07-10, ver docs/DICCIONARIO.md).
+
+    El motor (motor_breakeven.py, intocable) calcula:
+      "financiero"  = precio NET donde NPV=0            -> piso INFERIOR (abandono;
+                      abajo NO hay reservas; mata PDP+PNP+PND).
+      "operacional" = precio NET donde FC del ultimo año con aceite = 0 (Limite
+                      Economico) -> piso SUPERIOR (delta=0; mantener reservas).
+
+    Convencion de equipo (validada finanzas 2026-06-09; renombrada 2026-07-10):
+      PRECIO_EQUILIBRIO = piso INFERIOR (VPN=0). Antes "Breakeven Operacional".
+      BREAKEVEN         = piso SUPERIOR (L.E.; mantener el L.E./reservas del FC).
+                          Antes "Breakeven Financiero".
+
+    Se renombra aqui, en la frontera de lectura, sin tocar el motor ni sus tests
+    golden (tests/test_05_breakeven.py, que siguen con los nombres internos).
     """
-    df = df.rename(columns={
-        "BREAKEVEN_FINANCIERO_USD_BBL":  "_BK_TMP_USD_BBL",
-        "BREAKEVEN_OPERACIONAL_USD_BBL": "BREAKEVEN_FINANCIERO_USD_BBL",
+    return df.rename(columns={
+        "BREAKEVEN_FINANCIERO_USD_BBL":  "PRECIO_EQUILIBRIO_USD_BBL",  # motor NPV=0 -> piso inferior
+        "BREAKEVEN_OPERACIONAL_USD_BBL": "BREAKEVEN_USD_BBL",          # motor FC ult.oil=0 (L.E.) -> piso superior
     })
-    return df.rename(columns={"_BK_TMP_USD_BBL": "BREAKEVEN_OPERACIONAL_USD_BBL"})
 
 
 def leer_breakeven() -> pd.DataFrame:
@@ -414,9 +514,11 @@ def leer_breakeven() -> pd.DataFrame:
         # BRENT_INSENSITIVE puede no existir en parquets generados con la versión antigua
         if "BRENT_INSENSITIVE" not in df.columns:
             df["BRENT_INSENSITIVE"] = False
+        # BK_P* (perfil de salida) solo existen si 05 corrio con PRED_PERFIL_SALIDA
+        _cols_perfil = [c for c in df.columns if c.startswith("BK_P")]
         df = df[["CAMPO", "VIGENCIA_BREAKEVEN", "CLASE_RESERVA",
                  "BREAKEVEN_OPERACIONAL_USD_BBL", "BREAKEVEN_FINANCIERO_USD_BBL",
-                 "SOLVER_S1_FALLO", "BRENT_INSENSITIVE"]].copy()
+                 "SOLVER_S1_FALLO", "BRENT_INSENSITIVE"] + _cols_perfil].copy()
         return _swap_breakeven_labels(df)
 
     # --- Fallback: Breakeven.xlsm (VBA, solo Cierre 2024, falla en ~80% de campos) ---
@@ -459,13 +561,13 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
     """
     Calcula, por CAMPO×VIGENCIA_BREAKEVEN, los precios de anclaje físico para el modelo.
 
-    Convención finanzas (post-swap, ver _swap_breakeven_labels):
-      FINANCIERO = piso SUPERIOR (delta=0; límite económico de PNP/PND).
-      OPERACIONAL = piso INFERIOR (abandono; mata PDP+PNP+PND).
+    Convención equipo (post-swap, ver _swap_breakeven_labels; renombre 2026-07-10):
+      BREAKEVEN         = piso SUPERIOR (L.E.; mantener reservas). Antes "financiero".
+      PRECIO_EQUILIBRIO = piso INFERIOR (VPN=0; abandono). Antes "operacional".
 
     Columnas de salida:
-      BREAKEVEN_FINANCIERO_USD_BBL  — ponderado por vol 1P (todas las clases), trazabilidad.
-      BREAKEVEN_OPERACIONAL_USD_BBL — ponderado por vol PDP, trazabilidad.
+      BREAKEVEN_USD_BBL         — ponderado por vol 1P (todas las clases), trazabilidad.
+      PRECIO_EQUILIBRIO_USD_BBL — ponderado por vol PDP, trazabilidad.
       BK_ANCLA_FIN_USD_BBL  — piso SUPERIOR del anclaje. Criterio CLASE DE MAYOR
                                INCERTIDUMBRE (2026-06-11): BK financiero de la clase mas
                                riesgosa presente con volumen y solver valido (PND>PNP>PDP).
@@ -525,6 +627,9 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
         # bookeable. Si el solver no lo separa, la clase degrada a BK_ANCLA_FIN
         # (ponderado) en 02_synthetic.
         salidas_clase = {"D-PNP": np.nan, "D-PND": np.nan}
+        # Perfil de salida volumetrico D-PDP (track Calidad, directriz §4bis.6): solo
+        # presente si 05_breakeven corrio con PRED_PERFIL_SALIDA (columnas BK_P*).
+        perfil_pdp = {}
         # Conteo de insensibles para flag de campo
         n_clases = n_insensibles = 0
 
@@ -540,12 +645,13 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
 
             vol_vals = vol_c[col_v].values
             v = float(vol_vals[0]) if len(vol_vals) > 0 and pd.notna(vol_vals[0]) else 0.0
-            # Tras el swap, FINANCIERO = FC ultimo año con aceite (motor "operacional",
-            # solver S1) -> gateado por SOLVER_S1_FALLO. OPERACIONAL = NPV=0 (motor
-            # "financiero", brentq, casi siempre converge) -> sin gate.
-            bk_fin_c = (float(fila_bk["BREAKEVEN_FINANCIERO_USD_BBL"].values[0])
+            # Tras el swap (nombres de equipo): BREAKEVEN = FC ultimo año con aceite
+            # (motor "operacional", solver S1) -> gateado por SOLVER_S1_FALLO.
+            # PRECIO_EQUILIBRIO = NPV=0 (motor "financiero", brentq, casi siempre
+            # converge) -> sin gate. bk_fin_c = superior (BREAKEVEN); bk_op_c = inferior.
+            bk_fin_c = (float(fila_bk["BREAKEVEN_USD_BBL"].values[0])
                         if not fila_bk["SOLVER_S1_FALLO"].values[0] else np.nan)
-            bk_op_c  = float(fila_bk["BREAKEVEN_OPERACIONAL_USD_BBL"].values[0])
+            bk_op_c  = float(fila_bk["PRECIO_EQUILIBRIO_USD_BBL"].values[0])
 
             # Ponderado global (trazabilidad / BK_REFERENCIA en PBI)
             if not np.isnan(bk_fin_c) and v > 0:
@@ -570,6 +676,13 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
             if clase in salidas_clase and not np.isnan(bk_fin_c):
                 salidas_clase[clase] = bk_fin_c
 
+            # Perfil de salida D-PDP: capturar BK_P* de la fila D-PDP (si existen)
+            if clase == "D-PDP":
+                for pc in [c for c in fila_bk.columns if c.startswith("BK_P")]:
+                    val = fila_bk[pc].values[0]
+                    if pd.notna(val):
+                        perfil_pdp[pc] = float(val)
+
         # Campo Brent-insensible: todas las clases presentes son BRENT_INSENSITIVE
         brent_insens = (n_clases > 0) and (n_insensibles == n_clases)
 
@@ -580,8 +693,8 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
         else:
             # Fallback: promedio simple cuando no hay volumen para ponderar
             # (ej. CASTILLA ESTE: solo D-PDP disponible, sin PNP/PND)
-            bk_vals_fin = bk_cv[~bk_cv["SOLVER_S1_FALLO"]]["BREAKEVEN_FINANCIERO_USD_BBL"].dropna().values
-            bk_vals_op  = bk_cv["BREAKEVEN_OPERACIONAL_USD_BBL"].dropna().values
+            bk_vals_fin = bk_cv[~bk_cv["SOLVER_S1_FALLO"]]["BREAKEVEN_USD_BBL"].dropna().values
+            bk_vals_op  = bk_cv["PRECIO_EQUILIBRIO_USD_BBL"].dropna().values
             bk_fin_pond = float(np.mean(bk_vals_fin)) if len(bk_vals_fin) > 0 else np.nan
             bk_op_pond  = float(np.mean(bk_vals_op))  if len(bk_vals_op)  > 0 else np.nan
             if not np.isnan(bk_fin_pond) and not brent_insens:
@@ -621,8 +734,8 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
         filas.append({
             "CAMPO":                          campo,
             "VIGENCIA_BREAKEVEN":             vigencia,
-            "BREAKEVEN_FINANCIERO_USD_BBL":   bk_fin_pond,
-            "BREAKEVEN_OPERACIONAL_USD_BBL":  bk_op_pond,
+            "BREAKEVEN_USD_BBL":              bk_fin_pond,
+            "PRECIO_EQUILIBRIO_USD_BBL":     bk_op_pond,
             "BK_ANCLA_FIN_USD_BBL":           bk_ancla_fin,
             "BK_ANCLA_PDP_USD_BBL":           bk_ancla_pdp,
             "BK_ANCLA_CLASE":                 bk_ancla_clase,
@@ -630,6 +743,7 @@ def calcular_breakeven_ponderado(df_bk: pd.DataFrame, df_res: pd.DataFrame) -> p
             "BK_SALIDA_PND_USD_BBL":          salidas_clase["D-PND"],
             "BRENT_INSENSITIVE":              brent_insens,
             "ALERTA_BK":                      alerta_bk,
+            **perfil_pdp,   # BK_P10..BK_P90 solo en track Calidad
         })
     return pd.DataFrame(filas)
 
@@ -639,12 +753,19 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
     """
     Ensambla el tablon CAMPO x AÑO x ESCENARIO con todas las columnas canonicas.
 
-    Nuevas columnas (2026-06-04):
+    Nuevas columnas (2026-06-04; re-semantizadas 2026-07-09):
       VIGENCIA, ES_BASELINE, NIVEL_DEFINICIONAL
-      BASELINE_1P_VIGENCIA_MBPE — reservas OFICIAL del año de la vigencia
-      DELTA_SENS_MBPE           — ΔReservas = SENSIBILIDAD − BASELINE (target del modelo)
-      VIGENCIA_BREAKEVEN        — cierre FC del breakeven
+      CHECKPOINT_1P_MBPE — cierre OFICIAL del MISMO año A (referencia del confound)
+      BASELINE_1P_MBPE   — cierre OFICIAL del año ANTERIOR (A−1): la base real del deck
+      DELTA_SENS_MBPE    — ΔReservas = SENSIBILIDAD − BASELINE_1P_MBPE (target del modelo)
+      VIGENCIA_BREAKEVEN — cierre FC del breakeven
     """
+    # Lookup de cierres A−1: el deck de Sensibilidad de una vigencia A se construye sobre
+    # el último libro certificado DISPONIBLE en ese momento (cierre A−1), no el cierre A.
+    bline_prev = (df_res[["CAMPO", "AÑO", "VOLUMEN_1P_OFICIAL_MBPE"]]
+                  .assign(AÑO=lambda d: d["AÑO"] + 1)
+                  .rename(columns={"VOLUMEN_1P_OFICIAL_MBPE": "BASELINE_1P_MBPE"}))
+
     # ── 1. Serie historica BASE ────────────────────────────────────────────────
     hist = df_res.merge(df_px, on=["CAMPO", "AÑO"], how="left")
     hist["ESCENARIO"]                    = "BASE"
@@ -655,7 +776,8 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
     hist["VOLUMEN_1P_SENSIBILIDAD_MBPE"] = np.nan
     hist["CAMPO_ORIGEN_RAW"]             = hist["CAMPO"]
     hist["HOMOLOG_FLAG"]                 = "OK"
-    hist["BASELINE_1P_VIGENCIA_MBPE"]    = hist["VOLUMEN_1P_OFICIAL_MBPE"]
+    hist["CHECKPOINT_1P_MBPE"]           = hist["VOLUMEN_1P_OFICIAL_MBPE"]
+    hist = hist.merge(bline_prev, on=["CAMPO", "AÑO"], how="left")
     hist["DELTA_SENS_MBPE"]              = np.nan   # sin punto de sensibilidad en filas BASE
 
     # Incorporar ALERTA de la hoja Precio Net
@@ -671,22 +793,33 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
     cons["ES_BASELINE"] = False
     cons["ES_SINTETICO"] = False
 
-    # Lookup baseline: OFICIAL del mismo CAMPO × AÑO.
+    # Lookups de cierres: CHECKPOINT = OFICIAL del mismo CAMPO × AÑO (referencia del
+    # confound); BASELINE = OFICIAL de A−1 (la base real del deck → target del modelo).
     # Guard: si df_cons venía vacío (0 columnas porque no hay datos de Consolidado),
     # el merge fallaría con KeyError 'CAMPO'. En ese caso agregamos columnas NaN.
     if not cons.empty and "CAMPO" in cons.columns:
-        bline = (df_res[["CAMPO", "AÑO", "VOLUMEN_1P_OFICIAL_MBPE"]]
-                 .rename(columns={"VOLUMEN_1P_OFICIAL_MBPE": "BASELINE_1P_VIGENCIA_MBPE"}))
-        cons = cons.merge(bline, on=["CAMPO", "AÑO"], how="left")
+        chk = (df_res[["CAMPO", "AÑO", "VOLUMEN_1P_OFICIAL_MBPE"]]
+               .rename(columns={"VOLUMEN_1P_OFICIAL_MBPE": "CHECKPOINT_1P_MBPE"}))
+        cons = cons.merge(chk, on=["CAMPO", "AÑO"], how="left")
+        cons = cons.merge(bline_prev, on=["CAMPO", "AÑO"], how="left")
         cons["DELTA_SENS_MBPE"] = np.where(
-            cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna() & cons["BASELINE_1P_VIGENCIA_MBPE"].notna(),
-            cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"] - cons["BASELINE_1P_VIGENCIA_MBPE"],
+            cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna() & cons["BASELINE_1P_MBPE"].notna(),
+            cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"] - cons["BASELINE_1P_MBPE"],
             np.nan
         )
+        # Quarter con sensibilidad pero sin cierre A−1 (campo sin historia previa):
+        # no entrena — visible, nunca descartado en silencio.
+        sin_base = (cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna()
+                    & cons["BASELINE_1P_MBPE"].isna())
+        if "ALERTA" not in cons.columns:
+            cons["ALERTA"] = ""
+        cons.loc[sin_base, "ALERTA"] = cons.loc[sin_base, "ALERTA"].fillna("").apply(
+            lambda a: "|".join(dict.fromkeys(p for p in [str(a), "SIN_BASELINE_ANTERIOR"] if p and p != "nan")))
     else:
         # Consolidado vacío: agregar columnas requeridas para la concatenación posterior
-        cons["BASELINE_1P_VIGENCIA_MBPE"] = pd.Series(dtype=float)
-        cons["DELTA_SENS_MBPE"]           = pd.Series(dtype=float)
+        cons["CHECKPOINT_1P_MBPE"] = pd.Series(dtype=float)
+        cons["BASELINE_1P_MBPE"]   = pd.Series(dtype=float)
+        cons["DELTA_SENS_MBPE"]    = pd.Series(dtype=float)
 
     # ── 3. Concatenar ──────────────────────────────────────────────────────────
     tablon = pd.concat([hist, cons], ignore_index=True)
@@ -713,12 +846,14 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
 
     tablon["_VIG_BK"] = tablon.apply(lambda r: _elegir_vig_bk(r["CAMPO"], r["AÑO"]), axis=1)
 
+    # BK_P* (perfil de salida) solo existen si 05 corrio con PRED_PERFIL_SALIDA (Calidad)
+    _cols_perfil = [c for c in df_bk_pond.columns if c.startswith("BK_P")]
     tablon = tablon.merge(
         df_bk_pond[["CAMPO", "VIGENCIA_BREAKEVEN",
-                    "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
+                    "BREAKEVEN_USD_BBL", "PRECIO_EQUILIBRIO_USD_BBL",
                     "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL", "BK_ANCLA_CLASE",
                     "BK_SALIDA_PNP_USD_BBL", "BK_SALIDA_PND_USD_BBL",
-                    "BRENT_INSENSITIVE", "ALERTA_BK"]].rename(
+                    "BRENT_INSENSITIVE", "ALERTA_BK"] + _cols_perfil].rename(
                         columns={"VIGENCIA_BREAKEVEN": "_VIG_BK"}),
         on=["CAMPO", "_VIG_BK"], how="left"
     )
@@ -763,9 +898,9 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
         "BRENT_FLAT_USD_BBL", "DESCUENTO_CALIDAD_USD_BBL",
         "DESCUENTO_TRANSPORTE_USD_BBL", "PRECIO_NETO_USD_BBL",
         "VOLUMEN_PDP_MBPE", "VOLUMEN_PNP_MBPE", "VOLUMEN_PND_MBPE",
-        "VOLUMEN_1P_OFICIAL_MBPE", "BASELINE_1P_VIGENCIA_MBPE",
+        "VOLUMEN_1P_OFICIAL_MBPE", "CHECKPOINT_1P_MBPE", "BASELINE_1P_MBPE",
         "VOLUMEN_1P_SENSIBILIDAD_MBPE", "DELTA_SENS_MBPE",
-        "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
+        "BREAKEVEN_USD_BBL", "PRECIO_EQUILIBRIO_USD_BBL",
         "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL", "BK_ANCLA_CLASE",
         "BK_SALIDA_PNP_USD_BBL", "BK_SALIDA_PND_USD_BBL",
         "BRENT_INSENSITIVE",
@@ -774,11 +909,96 @@ def construir_tablon(df_res: pd.DataFrame, df_px: pd.DataFrame,
         "DELTA_ISOTONICA_VS_OFICIAL", "DELTA_SUAVE_VS_OFICIAL",
         "ALERTA",
     ]
+    # Perfil de salida (Calidad): conservar BK_P* si vinieron del merge, sin romper
+    # el orden canonico de Produccion (no aparecen cuando el flag esta apagado).
+    orden = orden + sorted(c for c in tablon.columns if c.startswith("BK_P"))
     for col in orden:
         if col not in tablon.columns:
             tablon[col] = np.nan
     return tablon[orden].sort_values(
         ["CAMPO", "AÑO", "ESCENARIO"]).reset_index(drop=True)
+
+
+def flag_bk_contradicho_por_deck(tablon: pd.DataFrame) -> pd.DataFrame:
+    """
+    Marca ALERTA=BK_CONTRADICHO_POR_DECK en campos donde la evidencia del deck real
+    contradice el umbral del breakeven (directriz DIRECTRIZ_ESCALERA_DECK.md §2). NO
+    cambia curvas — alimenta la lista de revisión de Finanzas. Dos disparadores:
+
+      (1) Libro vivo bajo el BK: existe punto real con Precio Neto <= BK_ANCLA_FIN + margen
+          y delta > −5%·baseline (el deck dice que el campo vive donde la escalera lo mata).
+      (2) Precipicio pegado a la banda (caso Caño Limón): la banda real entera está SOBRE
+          el BK_ANCLA_FIN y el primer dato real cae a < BK_COHERENCIA_BANDA_USD del BK —
+          la escalera sintética sostiene un precipicio profundo pegado a datos vivos.
+
+    Retorna el DataFrame de revisión (una fila por campo flaggeado) y muta `tablon`
+    agregando la ALERTA en las filas del campo.
+    """
+    real = tablon[(~tablon["ES_SINTETICO"]) & tablon["DELTA_SENS_MBPE"].notna()]
+    filas_rev = []
+    for campo, sub in real.groupby("CAMPO"):
+        bk_fin = sub["BK_ANCLA_FIN_USD_BBL"].dropna()
+        base   = sub["BASELINE_1P_MBPE"].dropna()
+        if bk_fin.empty or base.empty:
+            continue
+        bk_fin = float(bk_fin.iloc[-1])
+        baseline = float(base.iloc[-1])
+        # Materialidad: micro-campos con BK absurdo (FC garbage) ya salen por ALERTA_BK;
+        # esta lista es de revisión de Finanzas sobre campos con volumen real.
+        if baseline < BK_COHERENCIA_BASELINE_MIN:
+            continue
+
+        pneto = sub["PRECIO_NETO_USD_BBL"]
+        delta = sub["DELTA_SENS_MBPE"]
+        banda_lo = float(pneto.min())
+        banda_hi = float(pneto.max())
+
+        # Disparador (1): punto real bajo/junto al BK que sigue vivo. Requiere que el BK
+        # esté dentro del alcance de los datos (bk_fin <= banda_hi); si el BK está muy por
+        # encima de la banda (FC absurdo) el problema es el BK, no una contradicción sutil.
+        vivo_bajo_bk = bk_fin <= banda_hi and (
+            (pneto <= bk_fin + BK_COHERENCIA_MARGEN_USD) &
+            (delta > -BK_COHERENCIA_DELTA_FRAC * baseline)
+        ).any()
+
+        # Disparador (2): banda entera sobre el BK y pegada a él (precipicio a <$5)
+        banda_sobre_bk   = banda_lo > bk_fin
+        banda_pegada     = (banda_lo - bk_fin) < BK_COHERENCIA_BANDA_USD
+        precipicio_banda = banda_sobre_bk and banda_pegada
+
+        if not (vivo_bajo_bk or precipicio_banda):
+            continue
+
+        motivos = []
+        if vivo_bajo_bk:
+            motivos.append("libro-vivo-bajo-bk")
+        if precipicio_banda:
+            motivos.append("precipicio-pegado-a-banda")
+        filas_rev.append({
+            "CAMPO":              campo,
+            "BK_ANCLA_FIN_USD_BBL": round(bk_fin, 2),
+            "BANDA_REAL_LO_NETO": round(banda_lo, 2),
+            "GAP_BANDA_BK_USD":   round(banda_lo - bk_fin, 2),
+            "DELTA_MIN_BANDA_MBPE": round(float(delta.min()), 3),
+            "DELTA_MIN_BANDA_PCT":  round(float(delta.min()) / baseline * 100, 1),
+            "BASELINE_MBPE":      round(baseline, 2),
+            "VIGENCIA_BREAKEVEN": sub["VIGENCIA_BREAKEVEN"].dropna().iloc[-1]
+                                  if sub["VIGENCIA_BREAKEVEN"].notna().any() else "",
+            "MOTIVO":             " | ".join(motivos),
+        })
+        mask_campo = tablon["CAMPO"] == campo
+        tablon.loc[mask_campo, "ALERTA"] = tablon.loc[mask_campo, "ALERTA"].apply(
+            lambda a: _add_alert(a, "BK_CONTRADICHO_POR_DECK"))
+
+    return pd.DataFrame(filas_rev)
+
+
+def _add_alert(row_a, new_a):
+    """Fusiona ALERTA existente con una nueva etiqueta (dedupe, tolerante a NaN)."""
+    row_a = "" if (row_a is None or (isinstance(row_a, float) and row_a != row_a)) else str(row_a)
+    new_a = "" if (new_a is None or (isinstance(new_a, float) and new_a != new_a)) else str(new_a)
+    parts = [p for p in [row_a, new_a] if p]
+    return "|".join(dict.fromkeys(parts))
 
 
 def validar_tablon(df: pd.DataFrame) -> None:
@@ -793,12 +1013,13 @@ def validar_tablon(df: pd.DataFrame) -> None:
     print(f"  BREAKEVEN_FALLBACK          : {df['ALERTA'].str.contains('BREAKEVEN_FALLBACK', na=False).sum()}")
     print(f"  BREAKEVEN_VIGENCIA_STALE    : {df['ALERTA'].str.contains('BREAKEVEN_VIGENCIA_STALE', na=False).sum()}")
     print(f"  TARGET_NULO                 : {df['ALERTA'].str.contains('TARGET_NULO', na=False).sum()}")
+    print(f"  SIN_BASELINE_ANTERIOR       : {df['ALERTA'].str.contains('SIN_BASELINE_ANTERIOR', na=False).sum()}")
     print(f"  IDENTIDAD_PRECIO            : {df['ALERTA'].str.contains('IDENTIDAD_PRECIO', na=False).sum()}")
     print()
 
     for campo in sorted(df["CAMPO"].unique()):
         sub     = df[df["CAMPO"] == campo]
-        bk_vals = sub["BREAKEVEN_FINANCIERO_USD_BBL"].dropna().values
+        bk_vals = sub["BREAKEVEN_USD_BBL"].dropna().values
         bk_str  = f"{bk_vals[0]:.2f}" if len(bk_vals) > 0 else "N/A"
         vbk     = sub["VIGENCIA_BREAKEVEN"].dropna().values
         vbk_str = vbk[0] if len(vbk) > 0 else "N/A"
@@ -816,12 +1037,12 @@ def validar_tablon(df: pd.DataFrame) -> None:
     cons_mask = df["ES_BASELINE"] == False
     warns = []
     n_null_brent = df.loc[cons_mask, "BRENT_FLAT_USD_BBL"].isnull().sum()
-    n_null_bk    = df.loc[cons_mask, "BREAKEVEN_FINANCIERO_USD_BBL"].isnull().sum()
+    n_null_bk    = df.loc[cons_mask, "BREAKEVEN_USD_BBL"].isnull().sum()
     n_pos_cal    = (df["DESCUENTO_CALIDAD_USD_BBL"].dropna()    > 0).sum()
     n_pos_tra    = (df["DESCUENTO_TRANSPORTE_USD_BBL"].dropna() > 0).sum()
     n_vig_nula   = (df["VIGENCIA"].isna() | (df["VIGENCIA"] == "")).sum()
     if n_null_brent:  warns.append(f"BRENT_FLAT nulos (CONSOLIDADO): {n_null_brent}")
-    if n_null_bk:     warns.append(f"BREAKEVEN_FINANCIERO nulos (CONSOLIDADO): {n_null_bk}")
+    if n_null_bk:     warns.append(f"BREAKEVEN nulos (CONSOLIDADO): {n_null_bk}")
     if n_pos_cal:     warns.append(f"DESCUENTO_CALIDAD positivos: {n_pos_cal}")
     if n_pos_tra:     warns.append(f"DESCUENTO_TRANSPORTE positivos: {n_pos_tra}")
     if n_vig_nula:    warns.append(f"VIGENCIA nula: {n_vig_nula}")
@@ -841,11 +1062,11 @@ if __name__ == "__main__":
           f"{df_brent_of['BRENT_OFICIAL_USD_BBL'].min():.1f}–{df_brent_of['BRENT_OFICIAL_USD_BBL'].max():.1f}")
 
     print("[2/6] Leyendo HIST 1P / Reservas (MBPE)...")
-    df_res = leer_hist1p_reservas()
+    df_res, pesos_hist = leer_hist1p_reservas()
     print(f"      {len(df_res)} filas | campos: {sorted(df_res['CAMPO'].unique())}")
 
     print("[3/6] Leyendo HIST 1P / Precio Net (Brent remap + filtro excepciones)...")
-    df_px = leer_hist1p_precio(df_brent_of)
+    df_px = leer_hist1p_precio(df_brent_of, pesos_hist)
     print(f"      {len(df_px)} filas | años: {int(df_px['AÑO'].min())}–{int(df_px['AÑO'].max())}")
 
     print("[4/6] Leyendo Consolidado (multi-trimestre, fuente primaria)...")
@@ -858,11 +1079,20 @@ if __name__ == "__main__":
     df_bk_pond = calcular_breakeven_ponderado(df_bk, df_res)
     for _, row in df_bk_pond.iterrows():
         alert_str = f"  [{row['ALERTA_BK']}]" if row.get("ALERTA_BK") else ""
-        print(f"        {row['CAMPO']:<16} BK_fin={row['BREAKEVEN_FINANCIERO_USD_BBL']:.2f}"
+        print(f"        {row['CAMPO']:<16} BK={row['BREAKEVEN_USD_BBL']:.2f}"
               f"  [{row['VIGENCIA_BREAKEVEN']}]{alert_str}")
 
     print("\n[6/6] Construyendo tablon unico...")
     tablon = construir_tablon(df_res, df_px, df_bk_pond, df_cons)
+
+    # Coherencia BK↔deck (directriz §2): flag de revisión de Finanzas (no altera curvas)
+    df_bk_rev = flag_bk_contradicho_por_deck(tablon)
+    ruta_rev = RESULTADOS / "bk_revision_finanzas.csv"
+    df_bk_rev.sort_values("GAP_BANDA_BK_USD").to_csv(
+        ruta_rev, index=False, encoding="utf-8-sig") if not df_bk_rev.empty else \
+        pd.DataFrame(columns=["CAMPO", "MOTIVO"]).to_csv(ruta_rev, index=False, encoding="utf-8-sig")
+    print(f"  [BK↔deck] {len(df_bk_rev)} campos marcados BK_CONTRADICHO_POR_DECK -> {ruta_rev.name}")
+
     validar_tablon(tablon)
 
     tablon.to_parquet(STAGING / "tablon_unico.parquet", index=False)

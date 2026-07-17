@@ -62,4 +62,4 @@ if __name__ == "__main__":
     print("\n[NOTA] El flag alimenta la etiqueta de confianza (techo MEDIA en materiales,")
     print("motivo 'sensibilidad-no-identificada'). El tratamiento de la PREDICCION misma")
     print("(plano=baseline en banda) requiere aprobacion de finanzas:")
-    print("ver docs/DIRECTRIZ_SENSIBILIDAD_NO_IDENTIFICADA.md")
+    print("ver docs/INFORME_ESTADO_PROYECTO.md seccion 5")

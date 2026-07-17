@@ -20,15 +20,6 @@ table 'Diagnóstico M1'
 		summarizeBy: none
 		sourceColumn: MOTOR
 
-	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
-	column 'Ambiente Clave'
-		dataType: string
-		isHidden
-		isAvailableInMdx: false
-		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005502
-		summarizeBy: none
-		sourceColumn: AMBIENTE
-
 	column 'Precio Aceite (USD/bbl)'
 		dataType: double
 		formatString: $#,##0.00
@@ -56,21 +47,30 @@ table 'Diagnóstico M1'
 
 		annotation SummarizationSetBy = Automatic
 
-	/// Banda baja LOYO (P10) del volumen 1P en espacio Precio Neto (motor Isotónica).
-	column 'Vol P10 (MBPE)'
+	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
+	column 'Ambiente Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005502
+		summarizeBy: none
+		sourceColumn: AMBIENTE
+
+	/// Banda baja LOYO (P25) del volumen 1P en espacio Precio Neto (motor Isotónica).
+	column 'Vol P25 (MBPE)'
 		dataType: double
 		formatString: #,##0.0
 		lineageTag: c2be9724-2436-42c9-a8c6-a4e9bbbf2b18
 		summarizeBy: sum
-		sourceColumn: VOL_P10_MBPE
+		sourceColumn: VOL_P25_MBPE
 
-	/// Banda alta LOYO (P90) del volumen 1P en espacio Precio Neto (motor Isotónica).
-	column 'Vol P90 (MBPE)'
+	/// Banda alta LOYO (P75) del volumen 1P en espacio Precio Neto (motor Isotónica).
+	column 'Vol P75 (MBPE)'
 		dataType: double
 		formatString: #,##0.0
 		lineageTag: eb25a1a9-8edc-4e59-bcc5-af115e35ce4f
 		summarizeBy: sum
-		sourceColumn: VOL_P90_MBPE
+		sourceColumn: VOL_P75_MBPE
 
 	partition Partition = m
 		mode: import
@@ -87,7 +87,8 @@ table 'Diagnóstico M1'
 				    Prod = fCarga(RutaBase & "\resultados\output_matriz_modelo1.csv", "Producción"),
 				    Cal = fCarga(RutaBase & "\resultados_calidad\output_matriz_modelo1.csv", "Calidad"),
 				    Union = Table.Combine({Prod, Cal}),
-				    Slim = Table.SelectColumns(Union, {"CAMPO", "MOTOR", "PRECIO_ACEITE_USD_BBL", "DELTA_ANCLADO_MBPE", "VOLUMEN_1P_PREDICHO_MBPE", "VOL_P10_MBPE", "VOL_P90_MBPE", "AMBIENTE"}),
-				    Tipos = Table.TransformColumnTypes(Slim, {{"CAMPO", type text}, {"MOTOR", type text}, {"PRECIO_ACEITE_USD_BBL", type number}, {"DELTA_ANCLADO_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"VOL_P10_MBPE", type number}, {"VOL_P90_MBPE", type number}, {"AMBIENTE", type text}}, "en-US")
+				    Slim = Table.SelectColumns(Union, {"CAMPO", "MOTOR", "PRECIO_ACEITE_USD_BBL", "DELTA_ANCLADO_MBPE", "VOLUMEN_1P_PREDICHO_MBPE", "VOL_P25_MBPE", "VOL_P75_MBPE", "AMBIENTE"}),
+				    Tipos = Table.TransformColumnTypes(Slim, {{"CAMPO", type text}, {"MOTOR", type text}, {"PRECIO_ACEITE_USD_BBL", type number}, {"DELTA_ANCLADO_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"VOL_P25_MBPE", type number}, {"VOL_P75_MBPE", type number}, {"AMBIENTE", type text}}, "en-US")
 				in
 				    Tipos
+

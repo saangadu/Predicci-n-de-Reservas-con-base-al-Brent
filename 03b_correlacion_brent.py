@@ -56,9 +56,12 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from track import sufijo_track, flag
+
+_SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR    = Path(__file__).parent
-STAGING     = BASE_DIR / "datos" / "staging"
-RESULTADOS  = BASE_DIR / "resultados"
+STAGING     = BASE_DIR / "datos" / f"staging{_SUF}"
+RESULTADOS  = BASE_DIR / f"resultados{_SUF}"
 PLOTS_DIR   = STAGING / "plots_correlacion"
 PLOTS_ANAL  = RESULTADOS / "plots_analisis"
 STAGING.mkdir(parents=True, exist_ok=True)
@@ -68,7 +71,14 @@ PLOTS_ANAL.mkdir(parents=True, exist_ok=True)
 
 N_MIN_THEILSEN = 5    # minimo de puntos para Theil-Sen robusto
 N_MIN_PROP     = 2    # minimo para proporcional Aceite=k*Brent
-GATE_DORADO    = ["CASTILLA", "CASTILLA NORTE", "CASTILLA ESTE", "RUBIALES"]
+# Gate estadistico M2 (2026-07-15, ambos tracks): campos MATERIALES cuya recta no
+# generaliza (R2_LOO bajo) se REPORTAN en resultados/m2_r2_bajo.csv. No tumba el
+# pipeline: alimenta el motivo de confianza M2-fragil de 04 y la agenda de mejora.
+R2_LOO_UMBRAL    = 0.90   # R2>0.9 es el estandar de confiabilidad ALTA del piloto
+MATERIALIDAD_MIN = 20.0   # MBPE de baseline para considerar el campo material
+# Gate Dorado = pareto-10 (directriz 2026-07-09; ver docs/NORTE.md)
+GATE_DORADO    = ["RUBIALES", "CASTILLA", "CAÑO SUR ESTE", "CASTILLA NORTE", "AKACIAS",
+                  "CHICHIMENE", "CHICHIMENE SW", "LA CIRA", "CUPIAGUA", "YARIGUI-CANTAGALLO"]
 
 
 def datos_reales_campo(df: pd.DataFrame) -> pd.DataFrame:
@@ -182,9 +192,116 @@ def neto_desde_brent(coef: dict, brent) -> np.ndarray:
     Predictor del Modelo 2: convierte Brent -> Precio Aceite para un campo.
     Importable desde 03_modelo.py (p_ref del re-anclaje) y 04_pbi_export.py
     (composicion Brent -> Aceite -> Delta). Sin escenarios desde 2026-06-12.
+
+    Generalizado (investigacion M2, 2026-07-15): si el campo tiene una familia
+    adoptada (columna M2_PARAMS con JSON, seleccion bajo PRED_M2_SELECCION en
+    Calidad) se evalua esa familia; si no, la recta ALPHA + BETA·Brent de siempre.
+    La interfaz no cambia para 03/04: siguen pasando la fila de correlacion_brent.csv.
     """
     brent = np.asarray(brent, dtype=float)
+    params_json = coef.get("M2_PARAMS") if isinstance(coef, dict) else None
+    if params_json and isinstance(params_json, str) and params_json.strip():
+        import m2_familias as F
+        return F.predecir(coef["METODO"], F.params_desde_json(params_json), brent)
     return coef["ALPHA"] + coef["BETA"] * brent
+
+
+def cargar_seleccion_m2() -> dict:
+    """Registro de familias M2 adoptadas por campo (analisis_m2.py). Gobernanza por
+    track (misma que la seleccion M1): Produccion solo aplica ESTADO=ADOPTADO
+    (ratificado por finanzas); Calidad tambien ADOPTADO_CALIDAD (evidencia >5%
+    MAE_LOO + fisica, pendiente de ratificacion). Retorna {campo: fila_dict}."""
+    ruta = BASE_DIR / "resultados_calidad" / "seleccion_metodos_m2.csv"
+    if not ruta.exists():
+        return {}
+    reg = pd.read_csv(ruta)
+    estados = {"ADOPTADO"} if not _SUF else {"ADOPTADO", "ADOPTADO_CALIDAD"}
+    reg = reg[reg["ESTADO"].isin(estados)]
+    return {r["CAMPO"]: r.to_dict() for _, r in reg.iterrows()}
+
+
+def aplicar_seleccion_m2(df_coef: pd.DataFrame, df: pd.DataFrame,
+                         seleccion: dict) -> pd.DataFrame:
+    """
+    Re-ajusta por campo la familia/dataset adoptados y sobreescribe su fila en
+    df_coef: METODO, DATASET, M2_PARAMS (JSON para neto_desde_brent), BETA
+    (pendiente equivalente en $40-120 — los gates fisicos BETA>0 siguen aplicando),
+    metricas in-sample sobre HIST y LOO (test solo-HIST, protocolo del benchmark).
+
+    Guard: si el re-ajuste falla o la curva viola la fisica (datos cambiaron desde
+    el benchmark), el campo CONSERVA su recta Theil-Sen y se marca
+    ALERTA=M2_SELECCION_NO_APLICADA — el dispatch nunca degrada la fisica.
+    """
+    import m2_familias as F
+
+    df_real_all = datos_reales_campo(df)
+    # Sensibilidades del Consolidado (dataset challenger): solo train, nunca test
+    df_cons_all = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"])
+                     & df["BRENT_FLAT_USD_BBL"].notna()
+                     & df["PRECIO_NETO_USD_BBL"].notna()]
+
+    aplicados = 0
+    for campo, reg in seleccion.items():
+        idx = df_coef.index[df_coef["CAMPO"] == campo]
+        if len(idx) == 0:
+            continue
+        i = idx[0]
+        familia = str(reg["METODO"])
+        dataset = str(reg.get("DATASET", "HIST"))
+        h = df_real_all[df_real_all["CAMPO"] == campo]
+        b_h = h["BRENT_FLAT_USD_BBL"].values.astype(float)
+        y_h = h["PRECIO_NETO_USD_BBL"].values.astype(float)
+        extra_h = {"desc_cal": h["DESCUENTO_CALIDAD_USD_BBL"].values.astype(float),
+                   "desc_tra": h["DESCUENTO_TRANSPORTE_USD_BBL"].values.astype(float)}
+        c = df_cons_all[df_cons_all["CAMPO"] == campo]
+        usa_cons = dataset == "HIST+CONSOLIDADO"
+        b_c = c["BRENT_FLAT_USD_BBL"].values.astype(float) if usa_cons else np.empty(0)
+        y_c = c["PRECIO_NETO_USD_BBL"].values.astype(float) if usa_cons else np.empty(0)
+
+        # Ajuste final con el dataset adoptado (mismo protocolo del benchmark)
+        b_fit = np.concatenate([b_h, b_c]) if usa_cons else b_h
+        y_fit = np.concatenate([y_h, y_c]) if usa_cons else y_h
+        extra_fit = extra_h
+        if usa_cons:
+            extra_fit = {k: np.concatenate([np.asarray(v, dtype=float),
+                                            np.full(len(b_c), np.nan)])
+                         for k, v in extra_h.items()}
+        params = F.ajustar(familia, b_fit, y_fit, extra_fit)
+        if params is None or not F.pasa_fisica(familia, params):
+            df_coef.loc[i, "ALERTA"] = "M2_SELECCION_NO_APLICADA"
+            continue
+
+        # Metricas: in-sample sobre HIST (la verdad certificada) + LOO del protocolo
+        y_hat = F.predecir(familia, params, b_h)
+        resid = y_h - y_hat
+        rmse = float(np.sqrt(np.mean(resid ** 2)))
+        ss_tot = float(np.sum((y_h - np.mean(y_h)) ** 2))
+        r2 = (1 - float(np.sum(resid ** 2)) / ss_tot) if ss_tot > 1e-9 else np.nan
+        mae_loo, r2_loo = F.loo_familia(familia, b_h, y_h, extra_h,
+                                        b_cons=b_c if usa_cons else None,
+                                        y_cons=y_c if usa_cons else None)
+
+        beta_eq = F.beta_equivalente(familia, params)
+        df_coef.loc[i, "METODO"]   = familia
+        df_coef.loc[i, "DATASET"]  = dataset
+        df_coef.loc[i, "M2_PARAMS"] = F.params_a_json(params)
+        # BETA/ALPHA equivalentes: recta tangente promedio en la banda fisica —
+        # mantienen vivos los gates (0.3<BETA<1.5) y el fallback lineal de lectores
+        # que ignoren M2_PARAMS (neto_desde_brent SI usa la familia completa)
+        df_coef.loc[i, "BETA"]  = round(beta_eq, 4)
+        centro = float(np.mean(F.BANDA_FISICA))
+        neto_centro = float(F.predecir(familia, params, [centro])[0])
+        df_coef.loc[i, "ALPHA"] = round(neto_centro - beta_eq * centro, 4)
+        df_coef.loc[i, "N_PUNTOS"] = len(b_fit)
+        df_coef.loc[i, "R2"]      = round(r2, 4) if pd.notna(r2) else None
+        df_coef.loc[i, "RMSE"]    = round(rmse, 3)
+        df_coef.loc[i, "R2_LOO"]  = round(r2_loo, 4) if pd.notna(r2_loo) else None
+        df_coef.loc[i, "MAE_LOO"] = round(mae_loo, 3) if pd.notna(mae_loo) else None
+        df_coef.loc[i, "ALERTA"]  = "M2_SELECCION"
+        aplicados += 1
+    print(f"  [CALIDAD][M2_SELECCION] {aplicados}/{len(seleccion)} familias adoptadas "
+          f"aplicadas (registro: seleccion_metodos_m2.csv)")
+    return df_coef
 
 
 def plot_campo(campo: str, g: pd.DataFrame, coef: dict) -> None:
@@ -196,8 +313,13 @@ def plot_campo(campo: str, g: pd.DataFrame, coef: dict) -> None:
     fig, ax = plt.subplots(figsize=(9, 6))
     ax.scatter(b, y, color="steelblue", s=60, zorder=5,
                label=f"Reales HIST (n={coef['N_PUNTOS']})")
+    # Etiqueta: recta explicita si es lineal; nombre de la familia si hay adopcion M2
+    if str(coef.get("M2_PARAMS", "") or "").strip():
+        etiqueta = f"{coef['METODO']} (β_eq={coef['BETA']:.2f})"
+    else:
+        etiqueta = f"Aceite={coef['ALPHA']:.1f}+{coef['BETA']:.2f}·Brent"
     ax.plot(grid, neto_desde_brent(coef, grid), color="darkorange",
-            linewidth=2, label=f"Aceite={coef['ALPHA']:.1f}+{coef['BETA']:.2f}·Brent")
+            linewidth=2, label=etiqueta)
     # Linea Aceite=Brent (descuento cero) como referencia
     ax.plot(grid, grid, color="gray", linewidth=0.8, alpha=0.5, label="Aceite=Brent (desc=0)")
     ax.set_xlabel("Brent Flat (USD/bbl)")
@@ -277,14 +399,49 @@ if __name__ == "__main__":
     print(f"  k_portafolio (mediana ratio Aceite/Brent @ref de THEILSEN) = {k_portafolio}  "
           f"-> aplicado a {int(mask_fb.sum())} campos sin historia (ES_FALLBACK=True)")
 
-    # Descuento implicito @Brent ref para auditoria (Brent − Aceite, positivo)
+    # Columnas de la investigacion M2 (2026-07-15): DATASET del entrenamiento y
+    # parametros serializados de la familia (vacio = recta lineal de siempre)
+    df_coef["DATASET"] = "HIST"
+    df_coef["M2_PARAMS"] = ""
+
+    # Dispatch por campo (flag PRED_M2_SELECCION: auto-ON en Calidad via
+    # track.FLAGS_ON_EN_CALIDAD; OFF en Produccion hasta ratificacion):
+    # aplica las familias/datasets adoptados por analisis_m2.py, con guard fisico
+    if flag("PRED_M2_SELECCION"):
+        seleccion_m2 = cargar_seleccion_m2()
+        if seleccion_m2:
+            df_coef = aplicar_seleccion_m2(df_coef, df, seleccion_m2)
+        else:
+            print("  [M2_SELECCION] flag ON pero sin registro seleccion_metodos_m2.csv "
+                  "(correr analisis_m2.py) — se mantiene Theil-Sen en todo el portafolio")
+
+    # Descuento implicito @Brent ref para auditoria (Brent − Aceite, positivo).
+    # Via neto_desde_brent: respeta la familia adoptada cuando hay M2_PARAMS.
     df_coef["BRENT_REF"] = round(brent_ref, 2)
-    df_coef["NETO_REF_BASE"] = (df_coef["ALPHA"] + df_coef["BETA"] * brent_ref).round(2)
+    df_coef["NETO_REF_BASE"] = df_coef.apply(
+        lambda r: round(float(neto_desde_brent(r.to_dict(), [brent_ref])[0]), 2), axis=1)
     df_coef["DESCUENTO_IMPLICITO_REF"] = (brent_ref - df_coef["NETO_REF_BASE"]).round(2)
 
     df_coef.to_csv(STAGING / "correlacion_brent.csv", index=False, encoding="utf-8-sig")
     df_coef.to_csv(RESULTADOS / "correlacion_brent.csv", index=False, encoding="utf-8-sig")
     print(f"  Coeficientes: {RESULTADOS / 'correlacion_brent.csv'}  ({len(df_coef)} campos)")
+
+    # ── Reporte M2 con R2_LOO bajo en campos materiales (gate informativo, ambos tracks) ──
+    # Cierre mas reciente por campo = materialidad (mismo criterio del resto del pipeline)
+    _bases = (df[(df["ESCENARIO"] == "BASE") & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
+              .sort_values("AÑO").groupby("CAMPO")["VOLUMEN_1P_OFICIAL_MBPE"].last())
+    _rep = df_coef.copy()
+    _rep["BASELINE_MBPE"] = _rep["CAMPO"].map(_bases)
+    _rep = _rep[(_rep["BASELINE_MBPE"].fillna(0) >= MATERIALIDAD_MIN)
+                & (_rep["R2_LOO"].isna() | (_rep["R2_LOO"] < R2_LOO_UMBRAL))]
+    _rep = _rep[["CAMPO", "BASELINE_MBPE", "METODO", "DATASET", "N_PUNTOS",
+                 "R2", "R2_LOO", "MAE_LOO", "ES_FALLBACK", "ALERTA"]] \
+        .sort_values("BASELINE_MBPE", ascending=False)
+    _rep.to_csv(RESULTADOS / "m2_r2_bajo.csv", index=False, encoding="utf-8-sig")
+    print(f"  Gate informativo M2: {len(_rep)} campos materiales (>= {MATERIALIDAD_MIN:.0f} "
+          f"MBPE) con R2_LOO < {R2_LOO_UMBRAL} -> {RESULTADOS / 'm2_r2_bajo.csv'}")
+    if len(_rep):
+        print(_rep.head(15).to_string(index=False))
 
     # Resumen por metodo
     print(f"\n{'-'*60}\n  Resumen Modelo 2\n{'-'*60}")
@@ -311,8 +468,11 @@ if __name__ == "__main__":
     # Plots: gate dorado + top-6 materiales por baseline
     print("\n  Generando plots...")
     plot_campos = list(GATE_DORADO)
+    # Cierre del año MAS RECIENTE por campo (no .max() sobre valores: el maximo
+    # historico ≠ ultimo certificado en campos con reservas en caida — fix 2026-07-09)
     baselines = (df[(df["ESCENARIO"] == "BASE") & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
-                 .groupby("CAMPO")["VOLUMEN_1P_OFICIAL_MBPE"].max()
+                 .sort_values("AÑO")
+                 .groupby("CAMPO")["VOLUMEN_1P_OFICIAL_MBPE"].last()
                  .sort_values(ascending=False))
     for c in baselines.index[:6]:
         if c not in plot_campos:

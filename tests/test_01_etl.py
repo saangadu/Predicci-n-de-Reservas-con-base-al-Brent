@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_01_etl.py — Gate Fase 1: verifica invariantes del tablon_unico producido por 01_etl.py
 
 Todos los asserts son duros. Fallo de cualquiera bloquea el pipeline.
@@ -14,7 +14,8 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-STAGING = ROOT / "datos" / "staging"
+# Paths por track (Produccion vs Calidad): centralizados en tests/conftest.py
+from rutas_track import STAGING  # noqa: E402
 
 # Gate dorado: estos 4 campos son el baseline de validación (siempre deben estar)
 CAMPOS_GATE = {"CASTILLA", "CASTILLA NORTE", "CASTILLA ESTE", "RUBIALES"}
@@ -122,13 +123,13 @@ def test_vigencia_consolidado_es_quarter(tablon):
 
 
 def test_breakeven_presente(tablon):
-    """BREAKEVEN_FINANCIERO debe estar presente para todos los campos piloto."""
+    """BREAKEVEN (piso superior) debe estar presente para todos los campos piloto."""
     for campo in CAMPOS_PILOTO:
         sub = tablon[tablon["CAMPO"] == campo]
         if sub.empty:
             continue
-        bk = sub["BREAKEVEN_FINANCIERO_USD_BBL"].dropna()
-        assert len(bk) > 0, f"{campo}: sin BREAKEVEN_FINANCIERO_USD_BBL"
+        bk = sub["BREAKEVEN_USD_BBL"].dropna()
+        assert len(bk) > 0, f"{campo}: sin BREAKEVEN_USD_BBL"
 
 
 def test_castilla_este_breakeven_fallback_flaggeado(tablon):
@@ -187,11 +188,11 @@ def test_es_baseline_false_en_consolidado(tablon):
     assert (~cons["ES_BASELINE"]).all(), "Hay filas CONSOLIDADO con ES_BASELINE=True"
 
 
-def test_baseline_1p_vigencia_presente_en_base(tablon):
-    """Filas BASE con VOLUMEN_1P_OFICIAL deben tener BASELINE_1P_VIGENCIA no nulo."""
+def test_checkpoint_presente_en_base(tablon):
+    """Filas BASE con VOLUMEN_1P_OFICIAL deben tener CHECKPOINT (cierre A) no nulo."""
     base = tablon[(tablon["ESCENARIO"] == "BASE") & tablon["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
-    nulos = base["BASELINE_1P_VIGENCIA_MBPE"].isnull().sum()
-    assert nulos == 0, f"BASELINE_1P_VIGENCIA nulo en {nulos} filas BASE con OFICIAL"
+    nulos = base["CHECKPOINT_1P_MBPE"].isnull().sum()
+    assert nulos == 0, f"CHECKPOINT_1P nulo en {nulos} filas BASE con OFICIAL"
 
 
 def test_delta_nulo_en_base(tablon):
@@ -202,17 +203,50 @@ def test_delta_nulo_en_base(tablon):
 
 
 def test_delta_definido_cuando_hay_sensibilidad(tablon):
-    """Filas CONSOLIDADO con SENSIBILIDAD y BASELINE ambos disponibles → DELTA definido."""
+    """Filas CONSOLIDADO con SENSIBILIDAD y BASELINE (cierre A−1) → DELTA definido."""
     cons = tablon[tablon["ESCENARIO"].str.startswith("CONSOLIDADO", na=False)]
     con_ambos = cons[
         cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna() &
-        cons["BASELINE_1P_VIGENCIA_MBPE"].notna()
+        cons["BASELINE_1P_MBPE"].notna()
     ]
     if con_ambos.empty:
         pytest.skip("No hay filas CONSOLIDADO con SENSIBILIDAD y BASELINE")
     nulos_delta = con_ambos["DELTA_SENS_MBPE"].isnull().sum()
     assert nulos_delta == 0, \
         f"DELTA_SENS nulo en {nulos_delta} filas con SENSIBILIDAD y BASELINE disponibles"
+
+
+def test_delta_usa_cierre_anterior(tablon):
+    """Normalización v2 (2026-07-09): DELTA_SENS = VOL_SENS − cierre A−1, no cierre A.
+    CASTILLA 2024_Q1: 174.6 − 175.249 (cierre 2023) ≈ −0.65 MBPE. Con la semántica
+    vieja (cierre 2024 = 158.647) daría +15.95 — el confound."""
+    fila = tablon[(tablon["CAMPO"] == "CASTILLA")
+                  & (tablon["VIGENCIA"] == "2024_Q1")]
+    if fila.empty:
+        pytest.skip("CASTILLA 2024_Q1 no está en el tablón")
+    r = fila.iloc[0]
+    esperado = r["VOLUMEN_1P_SENSIBILIDAD_MBPE"] - r["BASELINE_1P_MBPE"]
+    assert abs(r["DELTA_SENS_MBPE"] - esperado) < 1e-6
+    assert r["DELTA_SENS_MBPE"] < 0, \
+        f"DELTA 2024_Q1 debería ser ≈−0.65 (vs cierre 2023); da {r['DELTA_SENS_MBPE']:.2f}"
+    assert abs(r["BASELINE_1P_MBPE"] - 175.249) < 0.01, \
+        f"BASELINE de vigencia 2024 debe ser el cierre 2023 (175.249), da {r['BASELINE_1P_MBPE']}"
+    assert abs(r["CHECKPOINT_1P_MBPE"] - 158.647) < 0.01, \
+        f"CHECKPOINT de vigencia 2024 debe ser el cierre 2024 (158.647), da {r['CHECKPOINT_1P_MBPE']}"
+
+
+def test_sin_baseline_anterior_flaggeado(tablon):
+    """Quarters con sensibilidad pero sin cierre A−1 → ALERTA=SIN_BASELINE_ANTERIOR
+    y DELTA NaN (no entrenan, nunca descartados en silencio)."""
+    cons = tablon[tablon["ESCENARIO"].str.startswith("CONSOLIDADO", na=False)]
+    sin_base = cons[cons["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna()
+                    & cons["BASELINE_1P_MBPE"].isna()]
+    if sin_base.empty:
+        pytest.skip("Todos los quarters con sensibilidad tienen cierre A−1")
+    assert sin_base["DELTA_SENS_MBPE"].isna().all()
+    sin_flag = sin_base[~sin_base["ALERTA"].str.contains("SIN_BASELINE_ANTERIOR", na=False)]
+    assert sin_flag.empty, \
+        f"{len(sin_flag)} filas sin cierre A−1 no llevan ALERTA=SIN_BASELINE_ANTERIOR"
 
 
 def test_stale_breakeven_flaggeado(tablon):
@@ -249,9 +283,9 @@ def test_columnas_obligatorias(tablon):
         "CAMPO", "AÑO", "VIGENCIA", "ESCENARIO", "ES_BASELINE", "ES_SINTETICO",
         "NIVEL_DEFINICIONAL", "BRENT_FLAT_USD_BBL", "DESCUENTO_CALIDAD_USD_BBL",
         "DESCUENTO_TRANSPORTE_USD_BBL", "PRECIO_NETO_USD_BBL",
-        "VOLUMEN_1P_OFICIAL_MBPE", "BASELINE_1P_VIGENCIA_MBPE",
+        "VOLUMEN_1P_OFICIAL_MBPE", "CHECKPOINT_1P_MBPE", "BASELINE_1P_MBPE",
         "VOLUMEN_1P_SENSIBILIDAD_MBPE", "DELTA_SENS_MBPE",
-        "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
+        "BREAKEVEN_USD_BBL", "PRECIO_EQUILIBRIO_USD_BBL",
         "BK_ANCLA_FIN_USD_BBL", "BK_ANCLA_PDP_USD_BBL", "BK_ANCLA_CLASE",
         "VIGENCIA_BREAKEVEN", "ALERTA",
     ]
@@ -261,9 +295,9 @@ def test_columnas_obligatorias(tablon):
 
 def test_breakeven_swap_financiero_mayor_operacional(tablon):
     """
-    Convencion finanzas (2026-06-09): BREAKEVEN_FINANCIERO/BK_ANCLA_FIN = piso
-    SUPERIOR (delta=0) > BREAKEVEN_OPERACIONAL/BK_ANCLA_PDP = piso INFERIOR
-    (abandono) para los campos gate dorado (ninguno tiene ESCALERA_DEGENERADA).
+    Convencion equipo (2026-06-09; renombre 2026-07-10): BREAKEVEN/BK_ANCLA_FIN = piso
+    SUPERIOR (delta=0; L.E.) > PRECIO_EQUILIBRIO/BK_ANCLA_PDP = piso INFERIOR
+    (VPN=0; abandono) para los campos gate dorado (ninguno tiene ESCALERA_DEGENERADA).
     """
     for campo in CAMPOS_GATE:
         sub = tablon[tablon["CAMPO"] == campo]

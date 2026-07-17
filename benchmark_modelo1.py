@@ -43,7 +43,9 @@ modelo = importlib.import_module("03_modelo")
 
 FEATURE = "PRECIO_NETO_USD_BBL"
 TARGET  = "DELTA_SENS_MBPE"
-GATE_DORADO = ["CASTILLA", "CASTILLA NORTE", "CASTILLA ESTE", "RUBIALES"]
+# Gate Dorado = pareto-10 (directriz 2026-07-09; ver docs/NORTE.md)
+GATE_DORADO = ["RUBIALES", "CASTILLA", "CAÑO SUR ESTE", "CASTILLA NORTE", "AKACIAS",
+               "CHICHIMENE", "CHICHIMENE SW", "LA CIRA", "CUPIAGUA", "YARIGUI-CANTAGALLO"]
 
 
 def loo_cv_motor(df_campo: pd.DataFrame, factory) -> dict:

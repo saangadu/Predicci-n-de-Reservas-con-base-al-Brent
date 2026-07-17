@@ -37,6 +37,20 @@
                       "Entity": "_Medidas"
                     }
                   },
+                  "Property": "Cierre 2025 (MBPE)"
+                }
+              },
+              "queryRef": "_Medidas.Cierre 2025 (MBPE)",
+              "nativeQueryRef": "Cierre 2025 (MBPE)"
+            },
+            {
+              "field": {
+                "Measure": {
+                  "Expression": {
+                    "SourceRef": {
+                      "Entity": "_Medidas"
+                    }
+                  },
                   "Property": "Vol 1P Baseline"
                 }
               },

@@ -1,4 +1,4 @@
-/// Dimensión de ambiente/track del pipeline: Producción (resultados/) vs Calidad (resultados_calidad/, con bandas LOYO P10-P90). Slicer de selección única sincronizado en las páginas de datos.
+/// Dimensión de ambiente/track del pipeline: Producción (resultados/) vs Calidad (resultados_calidad/, con bandas LOYO P25-P75). Slicer de selección única sincronizado en las páginas de datos.
 table Ambiente
 	lineageTag: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c01
 
@@ -27,7 +27,7 @@ table Ambiente
 		mode: import
 		source =
 				let
-				    Fuente = Table.FromRecords({[AMBIENTE="Producción", DESCRIPCION="Corrida oficial (resultados/)", ORDEN=1], [AMBIENTE="Calidad", DESCRIPCION="Track de calidad con bandas LOYO P10-P90 (resultados_calidad/)", ORDEN=2]}),
+				    Fuente = Table.FromRecords({[AMBIENTE="Producción", DESCRIPCION="Corrida oficial (resultados/)", ORDEN=1], [AMBIENTE="Calidad", DESCRIPCION="Track de calidad con bandas LOYO P25-P75 (resultados_calidad/)", ORDEN=2]}),
 				    Tipos = Table.TransformColumnTypes(Fuente, {{"AMBIENTE", type text}, {"DESCRIPCION", type text}, {"ORDEN", Int64.Type}})
 				in
 				    Tipos

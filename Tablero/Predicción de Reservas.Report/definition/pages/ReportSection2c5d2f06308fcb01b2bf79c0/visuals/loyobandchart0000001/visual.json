@@ -204,7 +204,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Confiabilidad LOYO por campo (ancho de banda P10-P90, MBPE)'"
+                  "Value": "'Confiabilidad LOYO por campo (ancho de banda P25-P75, MBPE)'"
                 }
               }
             },

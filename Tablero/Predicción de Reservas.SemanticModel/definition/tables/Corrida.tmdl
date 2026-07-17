@@ -77,3 +77,4 @@ table Corrida
 				    Tipos
 
 	annotation PBI_ResultType = Table
+

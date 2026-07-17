@@ -35,9 +35,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from track import sufijo_track
+
+_SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR   = Path(__file__).parent
-STAGING    = BASE_DIR / "datos" / "staging"
-RESULTADOS = BASE_DIR / "resultados"
+STAGING    = BASE_DIR / "datos" / f"staging{_SUF}"
+RESULTADOS = BASE_DIR / f"resultados{_SUF}"
 PLOTS_DIR  = RESULTADOS / "plots_analisis"
 RESULTADOS.mkdir(parents=True, exist_ok=True)
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -67,10 +70,10 @@ def volumenes_ultimo_anio(df_res: pd.DataFrame) -> pd.DataFrame:
 
 def bk_clase_mas_incierta(bk_campo_vig: pd.DataFrame, vols: dict) -> tuple:
     """
-    Breakeven financiero (post-swap, piso superior) de la clase MAS incierta presente
-    con volumen > 0, recorriendo PND -> PNP -> PDP.
+    BREAKEVEN (post-swap, piso superior; L.E./mantener reservas) de la clase MAS incierta
+    presente con volumen > 0, recorriendo PND -> PNP -> PDP.
 
-    Solo se acepta una clase si su breakeven financiero es valido (SOLVER_S1_FALLO=False
+    Solo se acepta una clase si su BREAKEVEN es valido (SOLVER_S1_FALLO=False
     y no NaN) — mismo gate que el ponderado. Retorna (bk_alt, clase_usada).
     """
     for clase, col_vol in ORDEN_INCERTIDUMBRE:
@@ -82,7 +85,7 @@ def bk_clase_mas_incierta(bk_campo_vig: pd.DataFrame, vols: dict) -> tuple:
             continue
         if bool(fila["SOLVER_S1_FALLO"].values[0]):
             continue   # breakeven financiero no confiable para esta clase
-        bk = fila["BREAKEVEN_FINANCIERO_USD_BBL"].values[0]
+        bk = fila["BREAKEVEN_USD_BBL"].values[0]
         if pd.notna(bk):
             return float(bk), clase
     return np.nan, None
@@ -101,8 +104,8 @@ def construir_comparativa(df_bk: pd.DataFrame, df_pond: pd.DataFrame,
             continue
         bk_ponderado   = float(pond_row["BK_ANCLA_FIN_USD_BBL"].values[0]) \
             if pd.notna(pond_row["BK_ANCLA_FIN_USD_BBL"].values[0]) else np.nan
-        bk_consolidado = float(pond_row["BREAKEVEN_FINANCIERO_USD_BBL"].values[0]) \
-            if pd.notna(pond_row["BREAKEVEN_FINANCIERO_USD_BBL"].values[0]) else np.nan
+        bk_consolidado = float(pond_row["BREAKEVEN_USD_BBL"].values[0]) \
+            if pd.notna(pond_row["BREAKEVEN_USD_BBL"].values[0]) else np.nan
         brent_insens   = bool(pond_row["BRENT_INSENSITIVE"].values[0])
 
         # Criterio B (alternativo): clase mas incierta presente
@@ -195,7 +198,7 @@ if __name__ == "__main__":
     df_bk = etl.leer_breakeven()
 
     print("[2/4] Leyendo volumenes por clase (HIST, ultimo año por campo)...")
-    df_res = etl.leer_hist1p_reservas()
+    df_res, _ = etl.leer_hist1p_reservas()
     df_vols = volumenes_ultimo_anio(df_res)
 
     print("[3/4] Calculando ponderado vigente (BK_ANCLA_FIN PNP+PND)...")

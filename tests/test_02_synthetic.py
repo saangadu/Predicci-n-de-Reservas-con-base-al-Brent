@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_02_synthetic.py — Gate de la Fase 2 (inyección de sintéticos, escalera financiero/operacional)
 
 Convención finanzas (2026-06-09): BK_ANCLA_FIN = piso SUPERIOR (financiero, delta=0),
@@ -22,8 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import importlib
 syn = importlib.import_module("02_synthetic")   # noqa: E402  (nombre empieza con número)
 
-BASE    = Path(__file__).resolve().parent.parent
-STAGING = BASE / "datos" / "staging"
+BASE = Path(__file__).resolve().parent.parent
+# Paths por track (Produccion vs Calidad): centralizados en tests/conftest.py
+from rutas_track import STAGING  # noqa: E402
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -68,11 +69,12 @@ def _tablon_minimal(campo: str, bk_sup: float, bk_inf: float,
             "VOLUMEN_PNP_MBPE":               (baseline_pnp * 0.7) if anio == 2024 else np.nan,
             "VOLUMEN_PND_MBPE":               (baseline_pnp * 0.3) if anio == 2024 else np.nan,
             "VOLUMEN_1P_OFICIAL_MBPE":        baseline_total if anio == 2024 else np.nan,
-            "BASELINE_1P_VIGENCIA_MBPE":      baseline_total,
+            "CHECKPOINT_1P_MBPE":             baseline_total,
+            "BASELINE_1P_MBPE":               baseline_total,
             "VOLUMEN_1P_SENSIBILIDAD_MBPE":   np.nan,
             "DELTA_SENS_MBPE":                np.nan,
-            "BREAKEVEN_FINANCIERO_USD_BBL":   bk_sup,
-            "BREAKEVEN_OPERACIONAL_USD_BBL":  bk_inf,
+            "BREAKEVEN_USD_BBL":              bk_sup,
+            "PRECIO_EQUILIBRIO_USD_BBL":     bk_inf,
             "BK_ANCLA_FIN_USD_BBL":           bk_sup,
             "BK_ANCLA_PDP_USD_BBL":           bk_inf,
             "BRENT_INSENSITIVE":              brent_insens,

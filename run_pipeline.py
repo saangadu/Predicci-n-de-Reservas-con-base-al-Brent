@@ -9,13 +9,19 @@ Secuencia:
   Fase 3b:  03b_correlacion_brent.py → tests/test_03b_correlacion.py (Modelo 2: Brent→Aceite)
   Fase 3:   03_modelo.py     → tests/test_03_modelo.py        (Modelo 1: Aceite→Delta)
   Fase 4:   04_pbi_export.py → tests/test_04_pbi_export.py    (composicion + meshgrid)
+  Gate NORTE: tests/test_norte.py (ambos tracks; G3/G5 comparativos en Calidad)
+  Gate Calidad: tests_calidad/ (solo track Calidad, seleccion de metodos)
 
 Orden 3b antes de 3 (2026-06-12): el re-anclaje de 03 necesita correlacion_brent.csv
 para traducir BRENT_REF -> p_ref por campo.
 
+Paridad de rigor (2026-07-15): --calidad corre los MISMOS gates que Produccion
+(los tests resuelven paths por track via rutas_track.py y PRED_TRACK=calidad).
+
 Si cualquier gate falla → pipeline aborta con exit code 1.
 100% verde → artefactos validos.
 """
+import os
 import subprocess
 import sys
 import time
@@ -33,10 +39,10 @@ RESET  = "\033[0m"  if sys.stdout.isatty() else ""
 PYTHON = sys.executable
 
 
-def correr(cmd: list[str], desc: str) -> tuple[int, float]:
+def correr(cmd: list[str], desc: str, env: dict | None = None) -> tuple[int, float]:
     print(f"\n{CYAN}>> {desc}{RESET}")
     t0 = time.time()
-    result = subprocess.run(cmd, cwd=ROOT)
+    result = subprocess.run(cmd, cwd=ROOT, env=env)
     elapsed = time.time() - t0
     return result.returncode, elapsed
 
@@ -81,8 +87,41 @@ FASES = [
 
 
 def main():
+    # Track Calidad: enruta a datos/staging_calidad y resultados_calidad. Desde
+    # 2026-07-15 (paridad de rigor, directriz usuario) Calidad corre los MISMOS gates
+    # pytest que Produccion: los tests resuelven sus paths por track via rutas_track.py
+    # (PRED_TRACK en el env del subproceso). NORTE corre como gate final en ambos
+    # tracks: G1/G2 duros siempre; G3/G5 comparativos en Calidad (divergencias a
+    # resultados_calidad/norte_divergencias.csv sin tumbar — ver tests/test_norte.py).
+    # Los flags de comportamiento (PRED_PERFIL_SALIDA, PRED_SELECCION_METODO,
+    # PRED_BANDAS_LOYO) estan ratificados y ON por defecto en TODOS los tracks desde
+    # 2026-07-15 (track.FLAGS_RATIFICADOS) — no hace falta prenderlos aqui.
+    # --sin-flags fuerza esos 3 flags a OFF (paridad con el comportamiento legacy
+    # pre-promocion, usado para el chequeo de paridad Produccion vs Calidad).
+    calidad   = "--calidad" in sys.argv
+    sin_flags = "--sin-flags" in sys.argv
+
+    # PYTHONIOENCODING=utf-8 para TODOS los hijos: los scripts imprimen unicode (↔, →, η)
+    # que crashea stdout cp1252 cuando la salida esta redirigida a archivo/pipe (CI, logs).
+    # No afecta los CSV (usan utf-8-sig explicito); solo la codificacion de consola.
+    child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    if calidad:
+        child_env["PRED_TRACK"] = "calidad"
+        # PRED_M2_SELECCION auto-ON en track Calidad via track.FLAGS_ON_EN_CALIDAD
+        # (no hace falta setdefault). Produccion sigue OFF hasta ratificacion.
+    if sin_flags:
+        # Paridad legacy: apaga ratificados Y el dispatch M2 de Calidad.
+        for _f in ("PRED_PERFIL_SALIDA", "PRED_SELECCION_METODO",
+                   "PRED_BANDAS_LOYO", "PRED_M2_SELECCION"):
+            child_env[_f] = "0"
+
     print(f"\n{NEGRITA}{'='*60}")
     print("  PIPELINE PREDICCIÓN 1P — Castilla/Rubiales")
+    estado_flags = "OFF (paridad legacy)" if sin_flags else "ON (ratificados, default)"
+    print(f"  Flags: {estado_flags}")
+    if calidad:
+        print(f"  {ROJO}TRACK=CALIDAD{RESET}{NEGRITA} -> resultados_calidad/ | "
+              f"gates: MISMOS de Produccion (NORTE G3/G5 comparativo)")
     print(f"{'='*60}{RESET}")
 
     resultados = []
@@ -100,7 +139,7 @@ def main():
         script_ok = True
         script_t  = 0.0
         if script:
-            rc, script_t = correr([PYTHON, script], f"Corriendo {script}")
+            rc, script_t = correr([PYTHON, script], f"Corriendo {script}", env=child_env)
             if rc != 0:
                 print(f"{ROJO}FAIL: {script} termino con error (rc={rc}){RESET}")
                 resultados.append({"fase": nombre, "tests": "N/A (script falló)", "estado": "FAIL"})
@@ -108,10 +147,11 @@ def main():
                 sys.exit(1)
             script_ok = True
 
-        # Correr gate pytest
+        # Correr gate pytest (mismo gate en ambos tracks: los tests resuelven sus
+        # paths por PRED_TRACK via rutas_track.py — paridad de rigor 2026-07-15)
         rc_gate, gate_t = correr(
             [PYTHON, "-m", "pytest", gate, "-v", "--tb=short"],
-            f"Gate: {gate}",
+            f"Gate: {gate}", env=child_env,
         )
 
         if rc_gate == 0:
@@ -133,6 +173,38 @@ def main():
 
         if rc_gate != 0:
             print(f"\n{ROJO}Pipeline abortado: {nombre} no superó el gate.{RESET}")
+            _imprimir_tabla(resultados)
+            sys.exit(1)
+
+    # Gate final NORTE (ambos tracks, paridad de rigor 2026-07-15): contrato de
+    # no-regresion sobre los artefactos completos del track. En Produccion G1/G2/G3/G5
+    # son duros; en Calidad G1/G2 duros y G3/G5 comparativos (el test reporta las
+    # divergencias en resultados_calidad/norte_divergencias.csv y pasa con warning).
+    rc_norte, t_norte = correr(
+        [PYTHON, "-m", "pytest", "tests/test_norte.py", "-v", "--tb=short"],
+        "Gate NORTE: tests/test_norte.py", env=child_env,
+    )
+    estado_norte = "PASS" if rc_norte == 0 else "FAIL"
+    resultados.append({"fase": "Gate NORTE — contrato", "tests": "test_norte.py",
+                       "estado": estado_norte, "tiempo": f"{t_norte:.1f}s"})
+    if rc_norte != 0:
+        print(f"\n{ROJO}Pipeline abortado: contrato NORTE violado.{RESET}")
+        _imprimir_tabla(resultados)
+        sys.exit(1)
+
+    # Gate propio del track Calidad: selección de método por campo (rigor creciente).
+    # No corre en Producción (NORTE cubre Producción). Solo con flags ON (no --sin-flags).
+    if calidad and not sin_flags:
+        rc_cal, t_cal = correr(
+            [PYTHON, "-m", "pytest", "tests_calidad/", "-v", "--tb=short"],
+            "Gate Calidad: tests_calidad/", env=child_env,
+        )
+        estado = "PASS" if rc_cal == 0 else "FAIL"
+        resultados.append({"fase": "Gate Calidad — selección método",
+                           "tests": "tests_calidad/", "estado": estado,
+                           "tiempo": f"{t_cal:.1f}s"})
+        if rc_cal != 0:
+            print(f"\n{ROJO}Track Calidad abortado: tests_calidad/ falló.{RESET}")
             _imprimir_tabla(resultados)
             sys.exit(1)
 

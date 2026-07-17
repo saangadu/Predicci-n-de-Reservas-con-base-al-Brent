@@ -261,8 +261,10 @@ table 'Modelo Campo'
 		summarizeBy: sum
 		sourceColumn: SESGO_RECUPERACION
 
-	/// ISOTONICA | PLANO_DECK | INSENSIBLE_PRECIO | SIN_MODELO.
-	column 'Tipo Modelo'
+	/// Familia de la curva M1 efectiva: ISOTONICA | PLANO_DECK | INSENSIBLE_PRECIO | SIN_MODELO.
+	/// Solapa INSENSIBLE_PRECIO/SIN_MODELO con 'Nivel Confianza': para CONTEOS manda Nivel
+	/// Confianza; esta columna describe la FORMA de la curva (taxonomía s13).
+	column 'Tipo de Curva'
 		dataType: string
 		displayFolder: 5. Flags
 		lineageTag: a1b2c3d4-0021-4001-9001-000000000021
@@ -293,13 +295,21 @@ table 'Modelo Campo'
 		summarizeBy: none
 		sourceColumn: SENSIBILIDAD_NO_IDENTIFICADA
 
-	/// Método real adoptado por el motor 'Suave' (híbridos s11/s12: Sigmoide, LinealRobusto, Plano…). El de 'Isotonica' es trivialmente Isotónica.
-	column 'Método Real Suave'
+	/// Algoritmo real servido por el rol Validación (2.º mejor LOYO por campo, s12: Suave, Sigmoide, LinealRobusto…).
+	column 'Método de Validación'
 		dataType: string
 		displayFolder: 5. Flags
 		lineageTag: a1b2c3d4-0025-4001-9001-000000000025
 		summarizeBy: none
 		sourceColumn: METODO_REAL_SUAVE
+
+	/// Algoritmo real servido por el rol Primario (s13: puede ser híbrido — Sigmoide, Plano… — no siempre Isotónica).
+	column 'Método Primario'
+		dataType: string
+		displayFolder: 5. Flags
+		lineageTag: a1b2c3d4-0026-4001-9001-000000000026
+		summarizeBy: none
+		sourceColumn: METODO_REAL_PRIMARIO
 
 	partition Partition = m
 		mode: import
@@ -316,8 +326,9 @@ table 'Modelo Campo'
 				    Prod = fCarga(RutaBase & "\resultados\dim_campo_modelo.csv", "Producción"),
 				    Cal = fCarga(RutaBase & "\resultados_calidad\dim_campo_modelo.csv", "Calidad"),
 				    Union = Table.Combine({Prod, Cal}),
-				    Tipos = Table.TransformColumnTypes(Union, {{"CAMPO", type text}, {"TIPO_MODELO", type text}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"AÑO_BASELINE", Int64.Type}, {"CIERRE_2025_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"PISO_EFECTIVO_USD_BBL", type number}, {"BREAKEVEN_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_USD_BBL", type number}, {"BREAKEVEN_REF_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"ALERTA_BK", type text}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"MAE_LOYO_MBPE", type number}, {"SKILL_LOYO", type number}, {"N_VIGENCIAS_LOYO", Int64.Type}, {"SESGO_RECUPERACION", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_R2", type number}, {"M2_MAE_LOO", type number}, {"M2_ALERTA", type text}, {"METODO_REAL_SUAVE", type text}, {"AMBIENTE", type text}}, "en-US")
+				    Tipos = Table.TransformColumnTypes(Union, {{"CAMPO", type text}, {"TIPO_MODELO", type text}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"AÑO_BASELINE", Int64.Type}, {"CIERRE_2025_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"PISO_EFECTIVO_USD_BBL", type number}, {"BREAKEVEN_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_USD_BBL", type number}, {"BREAKEVEN_REF_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"ALERTA_BK", type text}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"MAE_LOYO_MBPE", type number}, {"SKILL_LOYO", type number}, {"N_VIGENCIAS_LOYO", Int64.Type}, {"SESGO_RECUPERACION", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_R2", type number}, {"M2_MAE_LOO", type number}, {"M2_ALERTA", type text}, {"METODO_REAL_SUAVE", type text}, {"METODO_REAL_PRIMARIO", type text}, {"AMBIENTE", type text}}, "en-US")
 				in
 				    Tipos
 
 	annotation PBI_ResultType = Table
+

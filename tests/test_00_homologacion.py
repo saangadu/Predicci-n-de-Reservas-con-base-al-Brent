@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_00_homologacion.py — Gate Fase 0: verifica que el modulo de homologacion funciona
 correctamente antes de correr el ETL.
 
@@ -56,8 +56,10 @@ def test_alias_la_reforma(h):
 
 
 def test_alias_acae_san_miguel(h):
+    """DIM actualizado 2026-07-06: ACAE-SAN MIGUEL, ACAE SAN MIGUEL y LORO se
+    fusionan en la familia UNIFICADO LORO - ACAE (columna UNIFICADO manda)."""
     campo, flag = h.homologar("ACAE SAN MIGUEL")
-    assert campo == "ACAE-SAN MIGUEL"
+    assert campo == "UNIFICADO LORO - ACAE"
     assert flag == "OK"
 
 

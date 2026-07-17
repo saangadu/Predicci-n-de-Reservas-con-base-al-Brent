@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_03_modelo.py — Gate Fase 3: Modelo 1 (Delta = f(Precio Neto))
 
 Arquitectura 1D (2026-06-11): motores Isotonica (primario) + Suave/PCHIP (validacion),
@@ -16,8 +16,8 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-STAGING     = ROOT / "datos" / "staging"
-MODELOS_DIR = STAGING / "modelos"
+# Paths por track (Produccion vs Calidad): centralizados en tests/conftest.py
+from rutas_track import STAGING, MODELOS_DIR, RESULTADOS  # noqa: E402
 CAMPOS_PILOTO = ["CASTILLA", "CASTILLA NORTE", "CASTILLA ESTE", "RUBIALES"]
 SUFIJOS = ["iso", "suave"]   # primario, validacion
 
@@ -159,7 +159,7 @@ def test_peso_sintetico_formula():
 
 def test_metricas_resultados_existe():
     """metricas.csv debe existir tambien en resultados/ (matriz separada para Power BI)."""
-    assert (ROOT / "resultados" / "metricas.csv").exists()
+    assert (RESULTADOS / "metricas.csv").exists()
 
 
 def test_plots_sin_piloto():

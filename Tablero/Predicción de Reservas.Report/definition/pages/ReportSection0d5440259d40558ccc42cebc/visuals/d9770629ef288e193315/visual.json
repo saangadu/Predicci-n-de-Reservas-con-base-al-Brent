@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "d9770629ef288e193315",
   "position": {
-    "x": 32,
-    "y": 296,
+    "x": 32.4,
+    "y": 295.92,
     "z": 11000,
-    "height": 496,
-    "width": 1072,
+    "height": 496.8,
+    "width": 1071.36,
     "tabOrder": 11000
   },
   "visual": {
@@ -56,11 +56,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Vol P10 Curva"
+                  "Property": "Vol P25 Curva"
                 }
               },
-              "queryRef": "_Medidas.Vol P10 Curva",
-              "nativeQueryRef": "Vol P10 Curva"
+              "queryRef": "_Medidas.Vol P25 Curva",
+              "nativeQueryRef": "Vol P25 Curva"
             },
             {
               "field": {
@@ -70,11 +70,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Vol P90 Curva"
+                  "Property": "Vol P75 Curva"
                 }
               },
-              "queryRef": "_Medidas.Vol P90 Curva",
-              "nativeQueryRef": "Vol P90 Curva"
+              "queryRef": "_Medidas.Vol P75 Curva",
+              "nativeQueryRef": "Vol P75 Curva"
             }
           ]
         }
@@ -157,7 +157,7 @@
             }
           },
           "selector": {
-            "metadata": "_Medidas.Vol P10 Curva"
+            "metadata": "_Medidas.Vol P25 Curva"
           }
         },
         {
@@ -196,7 +196,7 @@
             }
           },
           "selector": {
-            "metadata": "_Medidas.Vol P90 Curva"
+            "metadata": "_Medidas.Vol P75 Curva"
           }
         }
       ],
@@ -240,7 +240,7 @@
             "start": {
               "expr": {
                 "Literal": {
-                  "Value": "1300D"
+                  "Value": "1500D"
                 }
               }
             },

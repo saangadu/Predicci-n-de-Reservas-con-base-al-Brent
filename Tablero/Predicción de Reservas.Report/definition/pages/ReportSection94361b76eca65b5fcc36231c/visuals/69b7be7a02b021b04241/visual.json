@@ -23,11 +23,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Rango P10-P90 (MBPE)"
+                  "Property": "Rango P25-P75 (MBPE)"
                 }
               },
-              "queryRef": "_Medidas.Rango P10-P90 (MBPE)",
-              "nativeQueryRef": "Rango P10-P90 (MBPE)"
+              "queryRef": "_Medidas.Rango P25-P75 (MBPE)",
+              "nativeQueryRef": "Rango P25-P75 (MBPE)"
             }
           ]
         }
@@ -79,7 +79,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Rango P10-P90 (MBPE)'"
+                  "Value": "'Rango P25-P75 (MBPE)'"
                 }
               }
             }

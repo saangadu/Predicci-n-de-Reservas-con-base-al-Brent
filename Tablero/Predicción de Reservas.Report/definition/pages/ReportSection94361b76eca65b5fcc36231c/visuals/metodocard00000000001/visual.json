@@ -23,11 +23,11 @@
                       "Entity": "_Medidas"
                     }
                   },
-                  "Property": "Método del Motor"
+                  "Property": "Método Real"
                 }
               },
-              "queryRef": "_Medidas.Método del Motor",
-              "nativeQueryRef": "Método del Motor"
+              "queryRef": "_Medidas.Método Real",
+              "nativeQueryRef": "Método Real"
             }
           ]
         }

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "2b7911vol0abs0c1d2e3f",
   "position": {
-    "x": 888,
-    "y": 120,
+    "x": 887.76,
+    "y": 125.28,
     "z": 8000,
-    "height": 584,
-    "width": 528,
+    "height": 583.2,
+    "width": 529.2,
     "tabOrder": 8000
   },
   "visual": {
@@ -664,58 +664,6 @@
             }
           ]
         }
-      },
-      {
-        "name": "2bfiltprecio00000001",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Puntos M1"
-              }
-            },
-            "Property": "Precio Neto (USD/bbl)"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "2bfiltvolumen0000001",
-        "field": {
-          "Aggregation": {
-            "Expression": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Puntos M1"
-                  }
-                },
-                "Property": "Volumen 1P (MBPE)"
-              }
-            },
-            "Function": 3
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "2bfiltserie000000001",
-        "field": {
-          "Aggregation": {
-            "Expression": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Puntos M1"
-                  }
-                },
-                "Property": "Serie"
-              }
-            },
-            "Function": 3
-          }
-        },
-        "type": "Advanced"
       }
     ]
   }

@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "ct7curves00000000001",
   "position": {
-    "x": 672,
-    "y": 304,
+    "x": 687.27272727272725,
+    "y": 320.07272727272726,
     "z": 7000,
-    "height": 360,
-    "width": 1216,
+    "height": 359.34545454545452,
+    "width": 1215.4909090909091,
     "tabOrder": 7000
   },
   "visual": {
@@ -196,7 +196,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Curva 1P del portafolio — Producción vs Calidad (banda P10–P90 de Calidad)'"
+                  "Value": "'Curva 1P del portafolio — Producción vs Calidad (banda P25–P75 de Calidad)'"
                 }
               }
             },

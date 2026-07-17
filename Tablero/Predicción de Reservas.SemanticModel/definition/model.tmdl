@@ -16,8 +16,6 @@ annotation PBI_QueryOrder = ["Predicción","Diagnóstico M1","Diagnóstico M2","
 ref table Predicción
 ref table 'Diagnóstico M1'
 ref table 'Diagnóstico M2'
-ref table 'Modelo Campo'
-ref table Corrida
 ref table 'Precio Brent'
 ref table Motor
 ref table Campo
@@ -30,6 +28,8 @@ ref table LocalDateTable_50dd2b90-876b-4779-bf7e-1025dce39798
 ref table 'Eje Brent'
 ref table Ambiente
 ref table 'Comparativa Tracks'
+ref table 'Modelo Campo'
+ref table Corrida
 
 ref cultureInfo en-US
 

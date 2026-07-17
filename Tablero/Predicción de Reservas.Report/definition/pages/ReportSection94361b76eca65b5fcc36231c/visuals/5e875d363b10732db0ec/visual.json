@@ -163,23 +163,5 @@
         }
       ]
     }
-  },
-  "filterConfig": {
-    "filters": [
-      {
-        "name": "92a16f441a640518d1c2",
-        "field": {
-          "Measure": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "_Medidas"
-              }
-            },
-            "Property": "Título Campo"
-          }
-        },
-        "type": "Advanced"
-      }
-    ]
   }
 }

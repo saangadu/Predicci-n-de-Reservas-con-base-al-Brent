@@ -75,6 +75,14 @@ ALIAS_OVERRIDE = {
     "CHICHIMENE K - T":    "CHICHIMENE",          # 2023 (antes del split de CHICHIMENE SW en 2024)
     "CHICHIMENE-K":        "CHICHIMENE",          # variantes de yacimiento (UNIFICADO: CHICHIMENE)
     "CHICHIMENE-T":        "CHICHIMENE",
+    # Re-fusion CHICHIMENE SW -> CHICHIMENE (directriz usuario 2026-07-09): estuvieron
+    # unificados hasta 2023 y la fuente los separo en 2024. El split partio la serie 1P
+    # (2023=149.7 incluia SW; 2024=102.3 sin SW) e inyecto un salto artificial = confound
+    # de vigencia. Con la agregacion v3 (01_etl) sus volumenes vuelven a SUMAR y la serie
+    # queda continua. El DIM trae UNIFICADO='CHICHIMENE SW'; este override lo re-fusiona
+    # ANTES del match contra DIM (paso 1 de homologar). Mover al DIM cuando el usuario lo
+    # edite (UNIFICADO de CHICHIMENE SW -> CHICHIMENE).
+    "CHICHIMENE SW":       "CHICHIMENE",
 }
 
 # Sufijos de yacimiento/segmento que cuelgan del nombre de campo y deben removerse

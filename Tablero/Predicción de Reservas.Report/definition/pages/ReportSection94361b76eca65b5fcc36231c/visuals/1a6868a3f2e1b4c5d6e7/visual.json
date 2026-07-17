@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "1a6868a3f2e1b4c5d6e7",
   "position": {
-    "x": 344,
-    "y": 120,
+    "x": 343.44,
+    "y": 120.96,
     "z": 3000,
-    "height": 584,
-    "width": 524,
+    "height": 583.2,
+    "width": 524.88,
     "tabOrder": 3000
   },
   "visual": {
@@ -664,58 +664,6 @@
             }
           ]
         }
-      },
-      {
-        "name": "3fe2486d824f70aab7ee",
-        "field": {
-          "Column": {
-            "Expression": {
-              "SourceRef": {
-                "Entity": "Puntos M1"
-              }
-            },
-            "Property": "Precio Neto (USD/bbl)"
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "62569d767191a95d3f50",
-        "field": {
-          "Aggregation": {
-            "Expression": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Puntos M1"
-                  }
-                },
-                "Property": "Delta (MBPE)"
-              }
-            },
-            "Function": 3
-          }
-        },
-        "type": "Advanced"
-      },
-      {
-        "name": "bc9a840f280aa550b4b1",
-        "field": {
-          "Aggregation": {
-            "Expression": {
-              "Column": {
-                "Expression": {
-                  "SourceRef": {
-                    "Entity": "Puntos M1"
-                  }
-                },
-                "Property": "Serie"
-              }
-            },
-            "Function": 3
-          }
-        },
-        "type": "Advanced"
       }
     ]
   }

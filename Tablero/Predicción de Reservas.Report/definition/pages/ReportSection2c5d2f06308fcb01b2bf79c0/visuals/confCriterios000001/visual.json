@@ -23,7 +23,7 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "12px",
-                      "color": "#00602A"
+                      "color": "#00602a"
                     }
                   }
                 ]
@@ -34,7 +34,7 @@
                     "value": "ALTA: ≥6 puntos reales · MAE <20% del certificado · divergencia Iso/Suave <30% · supera al predictor ingenuo.",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -45,7 +45,7 @@
                     "value": "MEDIA: MAE <40% y divergencia <50%, o alerta material (confound / M2 frágil) que baja desde ALTA.",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -56,7 +56,7 @@
                     "value": "BAJA: no cumple lo anterior, o baseline <0.5 MBPE (micro-campo).  SOLO SINTÉTICO: sin puntos reales.",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -78,14 +78,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   },
                   {
                     "value": ": error de validación dejar-uno-fuera vs 1P certificado (<20% bueno).",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -97,14 +97,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   },
                   {
                     "value": ": Isotónica vs Suave (<30% bueno).",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -116,14 +116,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#C2410C"
+                      "color": "#c2410c"
                     }
                   },
                   {
                     "value": ": recta Brent→precio en fallback, <5 puntos o R² LOO<0.",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -135,14 +135,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#C2410C"
+                      "color": "#c2410c"
                     }
                   },
                   {
                     "value": ": un punto real domina el error (RMSE/MAE>2).",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -154,14 +154,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#C2410C"
+                      "color": "#c2410c"
                     }
                   },
                   {
                     "value": ": la pendiente de precio no es separable del cambio de deck anual (η²≥0.8, bandas de precio sin solape).",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -173,14 +173,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#7C3AED"
+                      "color": "#7c3aed"
                     }
                   },
                   {
                     "value": ": ancla p_ref cae en el valle de la última vigencia (>15% del baseline) — la curva 'recupera' nivel histórico, no precio.",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -192,14 +192,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#0EA5E9"
+                      "color": "#0ea5e9"
                     }
                   },
                   {
                     "value": ": Brent sobre el techo de la banda del deck — isotónica saturada (out_of_bounds='clip').",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]
@@ -211,14 +211,14 @@
                     "textStyle": {
                       "fontFamily": "Segoe UI Semibold",
                       "fontSize": "10px",
-                      "color": "#DB2777"
+                      "color": "#db2777"
                     }
                   },
                   {
                     "value": ": Brent fuera de banda histórica ±$5 / BK de abandono contradicho por la certificación vigente (piso capado).",
                     "textStyle": {
                       "fontSize": "10px",
-                      "color": "#1E293B"
+                      "color": "#1e293b"
                     }
                   }
                 ]

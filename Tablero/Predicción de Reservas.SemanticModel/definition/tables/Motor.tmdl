@@ -1,6 +1,6 @@
 /// Dimensión de ROL de motor M1: 'Isotonica' = primario, 'Suave' = validación. Son roles, no
 /// métodos: desde s11/s12 el método real por campo puede ser un híbrido (Sigmoide,
-/// LinealRobusto, Plano…) — ver 'Modelo Campo'[Método Real Suave] y la medida [Método del Motor].
+/// LinealRobusto, Plano…) — ver 'Modelo Campo'[Método de Validación]/[Método Primario] y la medida [Método Real].
 /// NO renombrar los valores: están fijados en DAX (KEEPFILTERS) y filtros de visuales.
 table Motor
 	lineageTag: 10f976b1-774b-427a-af2d-7b7e710b75ac
@@ -11,6 +11,15 @@ table Motor
 		lineageTag: 7e4841dd-13d7-4645-b401-393a49c3c09d
 		summarizeBy: none
 		sourceColumn: MOTOR
+		sortByColumn: Orden
+
+	/// Etiqueta de negocio del rol — usar ESTA columna en visuales nuevos en vez de la
+	/// clave técnica 'Motor' (taxonomía s13: Rol = Primario/Validación; Método = algoritmo real).
+	column Rol
+		dataType: string
+		lineageTag: 771c7b4e-073d-4022-84b8-7168c41b58b1
+		summarizeBy: none
+		sourceColumn: ROL
 		sortByColumn: Orden
 
 	column Descripción
@@ -30,8 +39,8 @@ table Motor
 		mode: import
 		source =
 				let
-				    Fuente = Table.FromRecords({[MOTOR="Isotonica", DESCRIPCION="Primario — isotónica, monótona por construcción", ORDEN=1], [MOTOR="Suave", DESCRIPCION="Validación — híbrido: mejor método por campo (s11/s12)", ORDEN=2]}),
-				    Tipos = Table.TransformColumnTypes(Fuente, {{"MOTOR", type text}, {"DESCRIPCION", type text}, {"ORDEN", Int64.Type}})
+				    Fuente = Table.FromRecords({[MOTOR="Isotonica", ROL="Primario", DESCRIPCION="Primario — isotónica, monótona por construcción", ORDEN=1], [MOTOR="Suave", ROL="Validación", DESCRIPCION="Validación — 2.º mejor método LOYO por campo (s12)", ORDEN=2]}),
+				    Tipos = Table.TransformColumnTypes(Fuente, {{"MOTOR", type text}, {"ROL", type text}, {"DESCRIPCION", type text}, {"ORDEN", Int64.Type}})
 				in
 				    Tipos
 

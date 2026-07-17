@@ -21,15 +21,6 @@ table 'Diagnóstico M2'
 
 		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
-	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
-	column 'Ambiente Clave'
-		dataType: string
-		isHidden
-		isAvailableInMdx: false
-		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005503
-		summarizeBy: none
-		sourceColumn: AMBIENTE
-
 	/// Predicho = α + β·Brent.
 	column 'Precio Aceite (USD/bbl)'
 		dataType: double
@@ -39,6 +30,15 @@ table 'Diagnóstico M2'
 		sourceColumn: PRECIO_ACEITE_USD_BBL
 
 		annotation SummarizationSetBy = Automatic
+
+	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
+	column 'Ambiente Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005503
+		summarizeBy: none
+		sourceColumn: AMBIENTE
 
 	partition Partition = m
 		mode: import
@@ -59,3 +59,4 @@ table 'Diagnóstico M2'
 				    Tipos = Table.TransformColumnTypes(Slim, {{"CAMPO", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_ACEITE_USD_BBL", type number}, {"AMBIENTE", type text}}, "en-US")
 				in
 				    Tipos
+

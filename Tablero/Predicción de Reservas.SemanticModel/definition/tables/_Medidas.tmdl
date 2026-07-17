@@ -292,40 +292,41 @@ table _Medidas
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: c0a10001-2b3c-4d5e-8f90-a1b2c3d40006
 
-	/// Banda baja LOYO (P10) del track Calidad al Brent del escenario. Reusa 'Vol 1P P10'
+	/// Banda baja LOYO (P25) del track Calidad al Brent del escenario. Reusa 'Vol 1P P25'
 	/// (fix 2026-07-15: antes sumaba en crudo solo los campos con banda propia y quedaba
-	/// por debajo de la curva central; ver 'Vol 1P P10').
-	measure 'Vol P10 Cal' = CALCULATE ( [Vol 1P P10], REMOVEFILTERS ( 'Ambiente' ), 'Ambiente'[Ambiente] = "Calidad" )
+	/// por debajo de la curva central; ver 'Vol 1P P25').
+	measure 'Vol P25 Cal' = CALCULATE ( [Vol 1P P25], REMOVEFILTERS ( 'Ambiente' ), 'Ambiente'[Ambiente] = "Calidad" )
 		formatString: #,##0.0
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: c0a10001-2b3c-4d5e-8f90-a1b2c3d40007
 
-	/// Banda alta LOYO (P90) del track Calidad al Brent del escenario. Reusa 'Vol 1P P90'.
-	measure 'Vol P90 Cal' = CALCULATE ( [Vol 1P P90], REMOVEFILTERS ( 'Ambiente' ), 'Ambiente'[Ambiente] = "Calidad" )
+	/// Banda alta LOYO (P75) del track Calidad al Brent del escenario. Reusa 'Vol 1P P75'.
+	measure 'Vol P75 Cal' = CALCULATE ( [Vol 1P P75], REMOVEFILTERS ( 'Ambiente' ), 'Ambiente'[Ambiente] = "Calidad" )
 		formatString: #,##0.0
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: c0a10001-2b3c-4d5e-8f90-a1b2c3d40008
 
-	/// Banda baja P10 (Calidad) sobre 'Eje Brent' para dibujarla como línea punteada en la curva comparativa.
-	measure 'Vol P10 Curva Cal' = CALCULATE ( [Vol P10 Cal], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
+	/// Banda baja P25 (Calidad) sobre 'Eje Brent' para dibujarla como línea punteada en la curva comparativa.
+	measure 'Vol P25 Curva Cal' = CALCULATE ( [Vol P25 Cal], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
 		formatString: #,##0.0
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: c0a10001-2b3c-4d5e-8f90-a1b2c3d40009
 
-	/// Banda alta P90 (Calidad) sobre 'Eje Brent' para dibujarla como línea punteada en la curva comparativa.
-	measure 'Vol P90 Curva Cal' = CALCULATE ( [Vol P90 Cal], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
+	/// Banda alta P75 (Calidad) sobre 'Eje Brent' para dibujarla como línea punteada en la curva comparativa.
+	measure 'Vol P75 Curva Cal' = CALCULATE ( [Vol P75 Cal], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
 		formatString: #,##0.0
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: c0a10001-2b3c-4d5e-8f90-a1b2c3d4000a
 
-	/// Campos cuyo punto Producción cae FUERA de la banda P10-P90 de Calidad al Brent del escenario (inconsistencia material entre tracks).
+	/// Campos cuyo punto Producción cae FUERA de la banda P25-P75 de Calidad al Brent del escenario.
+	/// Ojo s13: la banda es intercuartil (cubre ~50%, no 80%) — un conteo mayor que antes es esperado, no una regresión.
 	measure '# Campos Prod Fuera de Banda' =
 			SUMX (
 				VALUES ( 'Campo'[Campo] ),
 				VAR p = [Vol 1P Prod]
-				VAR p10 = [Vol P10 Cal]
-				VAR p90 = [Vol P90 Cal]
-				RETURN IF ( NOT ISBLANK ( p10 ) && ( p < p10 || p > p90 ), 1 )
+				VAR p25 = [Vol P25 Cal]
+				VAR p75 = [Vol P75 Cal]
+				RETURN IF ( NOT ISBLANK ( p25 ) && ( p < p25 || p > p75 ), 1 )
 			)
 		formatString: #,##0
 		displayFolder: 4. Comparativa Ambientes
@@ -385,24 +386,27 @@ table _Medidas
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: c0a10001-2b3c-4d5e-8f90-a1b2c3d40012
 
-	/// Banda baja del portafolio (percentil 10 de residuales LOYO, isotónica). Campos sin
-	/// banda propia (menos de 2 vigencias reales) aportan su predicción central via
-	/// COALESCE — así la banda sumada del portafolio SIEMPRE encierra la curva central
-	/// (antes 'Vol P10 Cal' sumaba solo los campos con banda y quedaba por debajo de la
-	/// curva completa; ver docs/MAESTRO.md §10, fix 2026-07-15). Respeta el slicer de
-	/// Ambiente igual que 'Vol 1P Predicho'.
-	measure 'Vol 1P P10' =
+	/// Banda baja del portafolio (cuartil 25 de residuales LOYO, isotónica) agregada en
+	/// CUADRATURA (s13, 2026-07-17): semiancho del portafolio = √Σ(semiancho_campo²),
+	/// no la suma cruda — sumar bandas asume que los errores de ~114 campos se mueven
+	/// todos juntos en la misma dirección (correlación perfecta) y daba una franja
+	/// irrealmente ancha (~84 MBPE). Con errores LOYO independientes la franja queda
+	/// ~4-5x más angosta. Campos sin banda propia aportan semiancho 0 → la banda
+	/// encierra la curva central por construcción. Respeta el slicer de Ambiente.
+	measure 'Vol 1P P25' =
 			VAR _motor = IF ( HASONEVALUE ( 'Motor'[Motor] ), VALUES ( 'Motor'[Motor] ), "Isotonica" )
 			VAR _amb = IF ( HASONEVALUE ( 'Ambiente'[Ambiente] ), VALUES ( 'Ambiente'[Ambiente] ), "Producción" )
 			RETURN
 			CALCULATE (
-				SUMX (
-					VALUES ( 'Predicción'[Campo Clave] ),
-					COALESCE (
-						CALCULATE ( SUM ( 'Predicción'[Vol P10 (MBPE)] ) ),
-						CALCULATE ( SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] ) )
-					)
-				),
+				SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] )
+					- SQRT (
+						SUMX (
+							VALUES ( 'Predicción'[Campo Clave] ),
+							VAR _c = CALCULATE ( SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] ) )
+							VAR _p = CALCULATE ( SUM ( 'Predicción'[Vol P25 (MBPE)] ) )
+							RETURN IF ( ISBLANK ( _p ) || ISBLANK ( _c ), 0, ( _c - _p ) ^ 2 )
+						)
+					),
 				KEEPFILTERS ( 'Motor'[Motor] = _motor ),
 				KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb )
 			)
@@ -410,20 +414,22 @@ table _Medidas
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: 452c33e9-8ff5-4dfd-a13b-bc93ab25e136
 
-	/// Banda alta del portafolio (percentil 90 de residuales LOYO, isotónica). Misma
-	/// mecánica de COALESCE que 'Vol 1P P10' — ver esa medida.
-	measure 'Vol 1P P90' =
+	/// Banda alta del portafolio (cuartil 75 de residuales LOYO, isotónica) en
+	/// CUADRATURA — misma mecánica que 'Vol 1P P25', semiancho alto = P75 − central.
+	measure 'Vol 1P P75' =
 			VAR _motor = IF ( HASONEVALUE ( 'Motor'[Motor] ), VALUES ( 'Motor'[Motor] ), "Isotonica" )
 			VAR _amb = IF ( HASONEVALUE ( 'Ambiente'[Ambiente] ), VALUES ( 'Ambiente'[Ambiente] ), "Producción" )
 			RETURN
 			CALCULATE (
-				SUMX (
-					VALUES ( 'Predicción'[Campo Clave] ),
-					COALESCE (
-						CALCULATE ( SUM ( 'Predicción'[Vol P90 (MBPE)] ) ),
-						CALCULATE ( SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] ) )
-					)
-				),
+				SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] )
+					+ SQRT (
+						SUMX (
+							VALUES ( 'Predicción'[Campo Clave] ),
+							VAR _c = CALCULATE ( SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] ) )
+							VAR _p = CALCULATE ( SUM ( 'Predicción'[Vol P75 (MBPE)] ) )
+							RETURN IF ( ISBLANK ( _p ) || ISBLANK ( _c ), 0, ( _p - _c ) ^ 2 )
+						)
+					),
 				KEEPFILTERS ( 'Motor'[Motor] = _motor ),
 				KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb )
 			)
@@ -431,31 +437,31 @@ table _Medidas
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: e15a7ad5-24f4-4667-98d6-4f2aaafe6898
 
-	/// Banda P10 sobre el eje desconectado 'Eje Brent' (respeta el slicer de Ambiente activo).
-	measure 'Vol P10 Curva' = CALCULATE ( [Vol 1P P10], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
+	/// Banda P25 sobre el eje desconectado 'Eje Brent' (respeta el slicer de Ambiente activo).
+	measure 'Vol P25 Curva' = CALCULATE ( [Vol 1P P25], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: 453ee320-a0d1-4728-bd23-9e236d3f0f48
 
-	/// Banda P90 sobre el eje desconectado 'Eje Brent' (respeta el slicer de Ambiente activo).
-	measure 'Vol P90 Curva' = CALCULATE ( [Vol 1P P90], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
+	/// Banda P75 sobre el eje desconectado 'Eje Brent' (respeta el slicer de Ambiente activo).
+	measure 'Vol P75 Curva' = CALCULATE ( [Vol 1P P75], REMOVEFILTERS ( 'Precio Brent' ), TREATAS ( VALUES ( 'Eje Brent'[Brent (USD/bbl)] ), 'Precio Brent'[Brent (USD/bbl)] ) )
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: 30d960f5-6718-482c-b3fc-ee73b1478437
 
-	/// Ancho de la banda P10-P90 sobre 'Eje Brent' (para la capa de área sombreada apilada).
-	measure 'Vol Banda P10-P90 Curva' = [Vol P90 Curva] - [Vol P10 Curva]
+	/// Ancho de la banda P25-P75 sobre 'Eje Brent' (para la capa de área sombreada apilada).
+	measure 'Vol Banda P25-P75 Curva' = [Vol P75 Curva] - [Vol P25 Curva]
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: 86be0b1a-0e20-46c3-bb20-bda03bd3cf2a
 
-	/// Rango P10-P90 formateado para tarjetas/tooltips.
-	measure 'Rango P10-P90 (MBPE)' = FORMAT ( [Vol 1P P10], "#,##0" ) & " - " & FORMAT ( [Vol 1P P90], "#,##0" )
+	/// Rango P25-P75 formateado para tarjetas/tooltips.
+	measure 'Rango P25-P75 (MBPE)' = FORMAT ( [Vol 1P P25], "#,##0" ) & " - " & FORMAT ( [Vol 1P P75], "#,##0" )
 		displayFolder: 1. Volumen
 		lineageTag: e65ad191-f3ed-41ee-9647-a67fcfa7daa0
 
-	/// Ancho de la banda P10-P90 del track Calidad sobre 'Eje Brent' (capa de área apilada en la página Producción vs Calidad).
-	measure 'Vol Banda P10-P90 Curva Cal' = [Vol P90 Curva Cal] - [Vol P10 Curva Cal]
+	/// Ancho de la banda P25-P75 del track Calidad sobre 'Eje Brent' (capa de área apilada en la página Producción vs Calidad).
+	measure 'Vol Banda P25-P75 Curva Cal' = [Vol P75 Curva Cal] - [Vol P25 Curva Cal]
 		formatString: #,##0.0
 		displayFolder: 4. Comparativa Ambientes
 		lineageTag: 3b1d8b09-f3f8-46e1-9a84-76d7082d9a93
@@ -477,24 +483,24 @@ table _Medidas
 		lineageTag: cf5a6895-2235-4e21-aab9-dd4f12d33d59
 
 	/// Banda LOYO baja del campo seleccionado en Explorador de Campo (eje Precio Neto, motor Isotónica).
-	measure 'Vol P10 Campo' =
+	measure 'Vol P25 Campo' =
 			VAR _amb = IF ( HASONEVALUE ( 'Ambiente'[Ambiente] ), VALUES ( 'Ambiente'[Ambiente] ), "Producción" )
 			RETURN
-			CALCULATE ( SUM ( 'Diagnóstico M1'[Vol P10 (MBPE)] ), KEEPFILTERS ( 'Motor'[Motor] = "Isotonica" ), KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ) )
+			CALCULATE ( SUM ( 'Diagnóstico M1'[Vol P25 (MBPE)] ), KEEPFILTERS ( 'Motor'[Motor] = "Isotonica" ), KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ) )
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: 138407cb-1693-41bd-8f5d-8539c8344b10
 
 	/// Banda LOYO alta del campo seleccionado en Explorador de Campo (eje Precio Neto, motor Isotónica).
-	measure 'Vol P90 Campo' =
+	measure 'Vol P75 Campo' =
 			VAR _amb = IF ( HASONEVALUE ( 'Ambiente'[Ambiente] ), VALUES ( 'Ambiente'[Ambiente] ), "Producción" )
 			RETURN
-			CALCULATE ( SUM ( 'Diagnóstico M1'[Vol P90 (MBPE)] ), KEEPFILTERS ( 'Motor'[Motor] = "Isotonica" ), KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ) )
+			CALCULATE ( SUM ( 'Diagnóstico M1'[Vol P75 (MBPE)] ), KEEPFILTERS ( 'Motor'[Motor] = "Isotonica" ), KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ) )
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: 6bc36ae0-c8f3-4c75-8ecd-516436f7d971
 
-	measure 'Ancho Banda Campo' = [Vol P90 Campo] - [Vol P10 Campo]
+	measure 'Ancho Banda Campo' = [Vol P75 Campo] - [Vol P25 Campo]
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: 6fda55b0-4a8b-4ada-bd47-74dee6684763
@@ -572,12 +578,13 @@ table _Medidas
 		displayFolder: 3. Confiabilidad
 		lineageTag: b44fae24-f867-485a-bf45-0c2c6bdc80e1
 
-	/// Método real del motor seleccionado: Isotonica → Isotónica; Suave → el híbrido adoptado por campo (s11/s12, columna 'Método Real Suave' de Modelo Campo).
-	measure 'Método del Motor' =
+	/// Algoritmo real del rol seleccionado (taxonomía s13): Primario → 'Método Primario'
+	/// (puede ser híbrido, ya no siempre Isotónica); Validación → 'Método de Validación'.
+	measure 'Método Real' =
 			IF (
 				SELECTEDVALUE ( 'Motor'[Motor], "Isotonica" ) = "Suave",
-				COALESCE ( SELECTEDVALUE ( 'Modelo Campo'[Método Real Suave] ), "Suave" ),
-				"Isotónica"
+				COALESCE ( SELECTEDVALUE ( 'Modelo Campo'[Método de Validación] ), "Suave" ),
+				COALESCE ( SELECTEDVALUE ( 'Modelo Campo'[Método Primario] ), "Isotónica" )
 			)
 		displayFolder: 2. Price Intelligence
 		lineageTag: c3d4e5f6-0001-4003-9003-000000000001
@@ -591,20 +598,20 @@ table _Medidas
 		displayFolder: 2. Price Intelligence
 		lineageTag: c3d4e5f6-0002-4003-9003-000000000002
 
-	/// Banda LOYO baja en espacio DELTA (P10 − volumen del ancla). Para la franja del panel 'Espacio delta' del Explorador.
-	measure 'Delta P10 Campo' = [Vol P10 Campo] - [Vol Ancla Campo]
+	/// Banda LOYO baja en espacio DELTA (P25 − volumen del ancla). Para la franja del panel 'Espacio delta' del Explorador.
+	measure 'Delta P25 Campo' = [Vol P25 Campo] - [Vol Ancla Campo]
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: c3d4e5f6-0003-4003-9003-000000000003
 
-	/// Banda LOYO alta en espacio DELTA (P90 − volumen del ancla).
-	measure 'Delta P90 Campo' = [Vol P90 Campo] - [Vol Ancla Campo]
+	/// Banda LOYO alta en espacio DELTA (P75 − volumen del ancla).
+	measure 'Delta P75 Campo' = [Vol P75 Campo] - [Vol Ancla Campo]
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: c3d4e5f6-0004-4003-9003-000000000004
 
-	/// Ancho de la banda en espacio delta (= P90 − P10; idéntico al de volumen).
-	measure 'Ancho Banda Delta Campo' = [Delta P90 Campo] - [Delta P10 Campo]
+	/// Ancho de la banda en espacio delta (= P75 − P25; idéntico al de volumen).
+	measure 'Ancho Banda Delta Campo' = [Delta P75 Campo] - [Delta P25 Campo]
 		formatString: #,##0.0
 		displayFolder: 2. Price Intelligence
 		lineageTag: c3d4e5f6-0005-4003-9003-000000000005

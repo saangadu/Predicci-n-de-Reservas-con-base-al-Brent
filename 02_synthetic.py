@@ -47,8 +47,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from track import sufijo_track, flag
+
+_SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR = Path(__file__).parent
-STAGING  = BASE_DIR / "datos" / "staging"
+STAGING  = BASE_DIR / "datos" / f"staging{_SUF}"
 
 RANGO_USD = 5    # puntos en Tramo BAJO: [bk_inf - RANGO, bk_inf)
 PASO_USD  = 1
@@ -59,6 +62,17 @@ PASO_USD  = 1
 # entrenamiento. Caso tipico: anclas/salidas de breakevens extremos (GALEMBO
 # VPN=0 a $285) o salidas de clase sobre la banda (BORANDA $142).
 MARGEN_BANDA_USD = 1.0
+
+# Suavizado de transición (directriz DIRECTRIZ_ESCALERA_DECK.md §3): junto a la banda de
+# datos reales, el escalón sintético no puede sostener el precipicio completo — donde el
+# deck real (misma economía que la predicción) muestra el libro vivo, un escalón de
+# abandono profundo a <$5 de esos datos arrastra el ancla p_ref al fondo del valle y la
+# curva "recupera" volumen al subir el Brent (artefacto Caño Limón +34%). En la franja
+# TRANSICION_USD antes de la banda, el escalón se pisa a lo sumo CLIFF_FRAC·baseline por
+# debajo del peor delta real observado. Cap SIMÉTRICO al de monotonía (§4.3): ambos
+# impiden que un ancla sintética contradiga la evidencia real más cercana.
+TRANSICION_USD = 6.0
+CLIFF_FRAC     = 0.15
 
 
 def calcular_medianas_precio(df: pd.DataFrame) -> pd.DataFrame:
@@ -172,11 +186,15 @@ def _fila_sintetica(campo, pneto, med_cal, med_tra, vbk_v, bk_fin, bk_op_val,
         "VOLUMEN_PNP_MBPE":               np.nan,
         "VOLUMEN_PND_MBPE":               np.nan,
         "VOLUMEN_1P_OFICIAL_MBPE":        np.nan,
-        "BASELINE_1P_VIGENCIA_MBPE":      baseline,
+        # Los sinteticos se refieren SIEMPRE al ultimo libro certificado (baseline_latest):
+        # el floor fisico (vol=0 bajo abandono) es una propiedad del libro VIGENTE, no de
+        # una vigencia del deck. No llevan CHECKPOINT (no tienen año A).
+        "CHECKPOINT_1P_MBPE":             np.nan,
+        "BASELINE_1P_MBPE":               baseline,
         "VOLUMEN_1P_SENSIBILIDAD_MBPE":   vol_1p,
         "DELTA_SENS_MBPE":                delta,
-        "BREAKEVEN_FINANCIERO_USD_BBL":   bk_fin,
-        "BREAKEVEN_OPERACIONAL_USD_BBL":  bk_op_val,
+        "BREAKEVEN_USD_BBL":              bk_fin,
+        "PRECIO_EQUILIBRIO_USD_BBL":     bk_op_val,
         # Redondear a 4dp para que coincida con PRECIO_NETO_USD_BBL y las comparaciones
         # >= BK_ANCLA_PDP / < BK_ANCLA_FIN no fallen por error de float en los bordes
         # de los tramos BAJO/ESCALERA.
@@ -217,7 +235,12 @@ def generar_sinteticos(df: pd.DataFrame, medianas: pd.DataFrame,
     """
     banda_real_lo = banda_real_lo or {}
     filas = []
-    n_capados = n_en_banda = 0
+    n_capados = n_en_banda = n_suavizados = n_perfil = 0
+    usar_perfil = flag("PRED_PERFIL_SALIDA")
+    mbk_perfil_pcts = (10, 25, 50, 75, 90)
+    if usar_perfil:
+        print("  [CALIDAD] Perfil de salida ON: escalera de clase -> curva gradual "
+              "del FC (ALERTA=PERFIL_SALIDA, directriz 4bis.6)")
     for campo in df["CAMPO"].unique():
         sub = df[df["CAMPO"] == campo]
         # Guard de banda: techo absoluto de inyeccion para este campo
@@ -301,6 +324,54 @@ def generar_sinteticos(df: pd.DataFrame, medianas: pd.DataFrame,
         if pd.isna(baseline_total):
             continue   # sin baseline no hay espacio delta para la escalera
 
+        # ── P4: perfil de salida volumetrico (track Calidad, directriz §4bis.6) ──
+        # Reemplaza el acantilado de clase por la curva gradual "% de volumen que
+        # deja de ser economico" vs precio, tomada del MISMO FC (columnas BK_P*).
+        # Entre Precio Equilibrio (bk_inf, vol=0) y BK (bk_sup, reservas completas)
+        # el volumen recupera siguiendo el perfil. Mata el artefacto de recuperacion
+        # (Caño Limon +34%) porque la curva es gradual como el deck real.
+        perfil = {}
+        if usar_perfil:
+            for pct in mbk_perfil_pcts:
+                col = f"BK_P{pct}"
+                if col in fila_ancla.index and pd.notna(fila_ancla[col]):
+                    perfil[pct] = float(fila_ancla[col])
+        if perfil:
+            techo = min(bk_sup, tope_banda)
+            if techo - bk_inf <= PASO_USD:
+                continue
+            # Puntos (precio, fraccion de volumen ya salida); endpoints anclados
+            uniq = {round(bk_sup, 4): 0.0, round(bk_inf, 4): 1.0}
+            for pct, pv in perfil.items():
+                if bk_inf < pv < bk_sup:
+                    uniq[round(pv, 4)] = max(uniq.get(round(pv, 4), 0.0), pct / 100.0)
+            xp = np.array(sorted(uniq))
+            fp = np.array([uniq[k] for k in sorted(uniq)])
+            cap_real = min_delta_real.get(campo, np.nan)
+            for pneto in np.arange(bk_inf, techo, PASO_USD):
+                ex    = float(np.clip(np.interp(pneto, xp, fp), 0.0, 1.0))
+                delta = -ex * float(baseline_total)
+                nivel = float(baseline_total) + delta
+                alerta = "PERFIL_SALIDA"
+                if pd.notna(cap_real) and delta > float(cap_real):
+                    delta  = float(cap_real)
+                    nivel  = float(baseline_total) + delta
+                    alerta = "PERFIL_SALIDA|ESCALON_CAPADO"
+                    n_capados += 1
+                # Hard-zero (invariante M1: Vol=max(baseline+delta,0)): el cap_real
+                # (peor delta historico real del campo) puede superar -baseline_total
+                # cuando el baseline de referencia (cierre A-1) es menor al volumen
+                # certificado en la vigencia real mas mala — nunca reservas negativas.
+                if nivel < 0.0:
+                    nivel = 0.0
+                    delta = -float(baseline_total)
+                filas.append(_fila_sintetica(campo, pneto, med_cal, med_tra, vbk_v,
+                                             bk_sup, bk_inf, nivel, delta,
+                                             baseline_total, alerta,
+                                             sal_pnp=sal_pnp, sal_pnd=sal_pnd))
+            n_perfil += 1
+            continue   # perfil reemplaza la escalera de clases para este campo
+
         techo = max([bk_inf] + list(salidas.values()))
         # Guard de banda: la escalera no invade la banda de datos certificados
         techo = min(techo, tope_banda)
@@ -310,6 +381,11 @@ def generar_sinteticos(df: pd.DataFrame, medianas: pd.DataFrame,
         # ── Escalera: [bk_inf, techo) — nivel = clases vivas a cada precio ────
         vol_pdp  = float(bl_clase.get("pdp", 0.0) or 0.0)
         cap_real = min_delta_real.get(campo, np.nan)   # peor delta certificado
+        # Piso de transición (directriz §3): a lo sumo CLIFF_FRAC·baseline por debajo del
+        # peor delta real; solo aplica en la franja TRANSICION_USD antes de la banda.
+        piso_trans = (float(cap_real) - CLIFF_FRAC * float(baseline_total)
+                      if pd.notna(cap_real) else np.nan)
+        inicio_trans = techo - TRANSICION_USD
         for pneto in np.arange(bk_inf, techo, PASO_USD):
             nivel = vol_pdp + sum(float(bl_clase[c]) for c, s in salidas.items()
                                   if pneto >= s)
@@ -321,11 +397,24 @@ def generar_sinteticos(df: pd.DataFrame, medianas: pd.DataFrame,
                 nivel  = float(baseline_total) + delta
                 alerta = "ESCALON_CAPADO"
                 n_capados += 1
+            # Suavizado de transición (§3): junto a la banda, el escalón no cae por debajo
+            # del piso de transición (evita el precipicio pegado a datos reales vivos).
+            elif pd.notna(piso_trans) and pneto >= inicio_trans and delta < piso_trans:
+                delta  = piso_trans
+                nivel  = float(baseline_total) + delta
+                alerta = "ESCALON_SUAVIZADO"
+                n_suavizados += 1
             filas.append(_fila_sintetica(campo, pneto, med_cal, med_tra, vbk_v,
                                          bk_sup, bk_inf, nivel, delta,
                                          baseline_total, alerta,
                                          sal_pnp=sal_pnp, sal_pnd=sal_pnd))
 
+    if n_perfil > 0:
+        print(f"  [INFO] {n_perfil} campos con perfil de salida volumetrico "
+              f"(ALERTA=PERFIL_SALIDA, directriz §4bis.6)")
+    if n_suavizados > 0:
+        print(f"  [INFO] {n_suavizados} puntos sinteticos suavizados junto a la banda "
+              f"real (ALERTA=ESCALON_SUAVIZADO, directriz §3)")
     if n_capados > 0:
         print(f"  [INFO] {n_capados} puntos sinteticos capados por monotonia "
               f"(ALERTA=ESCALON_CAPADO)")

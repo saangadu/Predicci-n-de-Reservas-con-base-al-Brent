@@ -737,10 +737,10 @@ if __name__ == "__main__":
     # Bandas de incertidumbre LOYO (track Calidad, s9): presentes solo si 03 corrio con
     # PRED_BANDAS_LOYO. Guard por PRESENCIA de columnas (mismo patron que BK_P*): en
     # Produccion no existen y el export queda identico.
-    resid_p10 = (_met_full.set_index("CAMPO")["LOYO_RESID_P10"].to_dict()
-                 if "LOYO_RESID_P10" in _met_full.columns else {})
-    resid_p90 = (_met_full.set_index("CAMPO")["LOYO_RESID_P90"].to_dict()
-                 if "LOYO_RESID_P90" in _met_full.columns else {})
+    resid_p25 = (_met_full.set_index("CAMPO")["LOYO_RESID_P25"].to_dict()
+                 if "LOYO_RESID_P25" in _met_full.columns else {})
+    resid_p75 = (_met_full.set_index("CAMPO")["LOYO_RESID_P75"].to_dict()
+                 if "LOYO_RESID_P75" in _met_full.columns else {})
     BRENT_REF = float(_met_full["BRENT_REF_USD_BBL"].dropna().iloc[0]) \
         if _met_full["BRENT_REF_USD_BBL"].notna().any() else np.nan
 
@@ -880,7 +880,7 @@ if __name__ == "__main__":
             })
 
         # ── Matriz M1 pura: Precio Aceite -> Delta anclado / Volumen ─────────
-        _q10m1, _q90m1 = resid_p10.get(campo), resid_p90.get(campo)
+        _q25m1, _q75m1 = resid_p25.get(campo), resid_p75.get(campo)
         for label, modelo in modelos.items():
             d_ref = float(delta_refs[label])
             vol_anc = _vol_curva(modelo, pneto_grid, d_ref)
@@ -892,13 +892,13 @@ if __name__ == "__main__":
                 vp = float(vol_anc[i]) if pd.notna(vol_anc[i]) else np.nan
                 # Banda LOYO en espacio Precio Neto (mismo criterio que la matriz de
                 # prediccion en espacio Brent, lineas ~925-933): solo motor primario,
-                # clamp P10<=vol<=P90 sin negativos, colapsa a 0 bajo el piso.
-                if (label == "Isotonica" and _q10m1 is not None and pd.notna(_q10m1)
+                # clamp P25<=vol<=P75 sin negativos, colapsa a 0 bajo el piso.
+                if (label == "Isotonica" and _q25m1 is not None and pd.notna(_q25m1)
                         and pd.notna(vp) and vp > 0):
-                    vol_p10_m1 = round(max(0.0, min(vp, vp + float(_q10m1))), 2)
-                    vol_p90_m1 = round(max(vp, vp + float(_q90m1)), 2)
+                    vol_p25_m1 = round(max(0.0, min(vp, vp + float(_q25m1))), 2)
+                    vol_p75_m1 = round(max(vp, vp + float(_q75m1)), 2)
                 else:
-                    vol_p10_m1 = vol_p90_m1 = None
+                    vol_p25_m1 = vol_p75_m1 = None
                 filas_m1.append({
                     "CAMPO":                       campo,
                     "MOTOR":                       label,
@@ -906,8 +906,8 @@ if __name__ == "__main__":
                     "DELTA_ANCLADO_MBPE":          round(float(delta_anc[i]), 2)
                                                    if pd.notna(delta_anc[i]) else None,
                     "VOLUMEN_1P_PREDICHO_MBPE":    round(vp, 2) if pd.notna(vp) else None,
-                    "VOL_P10_MBPE":                vol_p10_m1,
-                    "VOL_P90_MBPE":                vol_p90_m1,
+                    "VOL_P25_MBPE":                vol_p25_m1,
+                    "VOL_P75_MBPE":                vol_p75_m1,
                     "VOLUMEN_1P_BASELINE_MBPE":    round(float(baseline), 2)
                                                    if pd.notna(baseline) else None,
                     "P_REF_USD_BBL":               round(float(p_ref), 2)
@@ -956,21 +956,21 @@ if __name__ == "__main__":
                     if pd.notna(baseline) and vol_base > 0 else np.nan
 
                 # Banda de incertidumbre LOYO (s9): curva + cuantiles de residuales.
-                # Clamps: P10 <= vol <= P90, sin negativos; bajo el piso (vol=0, afirmacion
+                # Clamps: P25 <= vol <= P75, sin negativos; bajo el piso (vol=0, afirmacion
                 # dura de abandono) la banda colapsa a 0 — la incertidumbre ahi es del BK,
                 # no de la curva. Solo motor primario (Isotonica); NaN sin residuales.
-                _q10, _q90 = resid_p10.get(campo), resid_p90.get(campo)
-                if (label == "Isotonica" and _q10 is not None and pd.notna(_q10)
+                _q25, _q75 = resid_p25.get(campo), resid_p75.get(campo)
+                if (label == "Isotonica" and _q25 is not None and pd.notna(_q25)
                         and vol_pred > 0):
-                    vol_p10 = round(max(0.0, min(vol_pred, vol_pred + float(_q10))), 2)
-                    vol_p90 = round(max(vol_pred, vol_pred + float(_q90)), 2)
+                    vol_p25 = round(max(0.0, min(vol_pred, vol_pred + float(_q25))), 2)
+                    vol_p75 = round(max(vol_pred, vol_pred + float(_q75)), 2)
                 else:
-                    vol_p10 = vol_p90 = None
-                ancho_banda = round(vol_p90 - vol_p10, 2) \
-                    if vol_p10 is not None and vol_p90 is not None else None
-                _extra_banda = ({"VOL_P10_MBPE": vol_p10, "VOL_P90_MBPE": vol_p90,
+                    vol_p25 = vol_p75 = None
+                ancho_banda = round(vol_p75 - vol_p25, 2) \
+                    if vol_p25 is not None and vol_p75 is not None else None
+                _extra_banda = ({"VOL_P25_MBPE": vol_p25, "VOL_P75_MBPE": vol_p75,
                                  "ANCHO_BANDA_LOYO_MBPE": ancho_banda}
-                                if resid_p10 else {})
+                                if resid_p25 else {})
 
                 filas.append({
                     **_extra_banda,
@@ -1202,6 +1202,13 @@ if __name__ == "__main__":
         pd.DataFrame(filas_m1).query("MOTOR == 'Suave'")
           .drop_duplicates("CAMPO")[["CAMPO", "METODO_REAL"]]
           .rename(columns={"METODO_REAL": "METODO_REAL_SUAVE"}),
+        on="CAMPO", how="left")
+    # s13: el metodo primario tambien puede ser hibrido — sin esta columna el tablero
+    # mostraba "Isotónica" para campos con hibrido adoptado (CASTILLA Sigmoide, etc.).
+    df_dim = df_dim.merge(
+        pd.DataFrame(filas_m1).query("MOTOR == 'Isotonica'")
+          .drop_duplicates("CAMPO")[["CAMPO", "METODO_REAL"]]
+          .rename(columns={"METODO_REAL": "METODO_REAL_PRIMARIO"}),
         on="CAMPO", how="left")
     ruta_dim = RESULTADOS / "dim_campo_modelo.csv"
     df_dim.to_csv(ruta_dim, index=False, encoding="utf-8-sig")

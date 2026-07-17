@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_05_breakeven.py — Gate de la Fase 0.5 (motor de Breakeven en Python)
 
 Cubre: detección de offset por vigencia, mapa de columnas, vigencia/campo desde
@@ -21,6 +21,8 @@ import motor_breakeven as mbk  # noqa: E402
 
 BASE   = Path(__file__).resolve().parent.parent
 RAW    = BASE / "datos" / "raw"
+# Paths por track (Produccion vs Calidad): centralizados en tests/conftest.py
+from rutas_track import STAGING  # noqa: E402
 FC_DIR = RAW / "Formatos FC"
 PLANTILLA = RAW / "Formatos FC" / "Formatos FC.xlsx"   # plantilla vacía (layout)
 
@@ -235,6 +237,109 @@ def test_limite_economico_argmax_sin_doble_abandono():
     assert msg == "OK", f"Financiero debe converger: {msg}"
 
 
+# ── Combinación multi-FC (directriz §4bis.3, 2026-07-11) ────────────────────────
+
+def test_combinar_hojas_suma():
+    """
+    Dos componentes del mismo UNIFICADO → volúmenes/costos SUMADOS año a año y el BK
+    del combinado entre los BKs individuales, más cerca del componente GRANDE (la raíz
+    de la suma de flujos pondera por magnitud económica, no promedio simple).
+    """
+    grande = _sintetico()                        # 100 bbl/año, opex 10
+    chico  = _sintetico()
+    chico["ACEITE_VTS_NETO"] = np.array([10.0, 10.0, 10.0])   # 10x menor
+    chico["OPEX"]            = np.array([5.0, 5.0, 5.0])      # opex proporcionalmente alto
+    chico["CAPEX"]           = np.zeros(3)
+    chico["_abandono_total"] = 3.0
+
+    comb = mbk.combinar_hojas([grande, chico])
+    assert np.allclose(comb["ACEITE_VTS_NETO"], [110.0, 110.0, 110.0])
+    assert np.allclose(comb["OPEX"], [15.0, 15.0, 15.0])
+    assert comb["_abandono_total"] == pytest.approx(33.0)
+    assert comb["_ult"] == 2 and comb["_ult_oil"] == 2
+
+    ope_g, _ = mbk.breakeven_operacional(grande)   # fc = 100p−10 → 0.10
+    ope_c, _ = mbk.breakeven_operacional(chico)    # fc = 10p−5  → 0.50
+    ope_x, msg = mbk.breakeven_operacional(comb)   # fc = 110p−15 → 0.13636
+    assert msg in mbk.MENSAJES_OK
+    assert min(ope_g, ope_c) < ope_x < max(ope_g, ope_c)
+    assert abs(ope_x - ope_g) < abs(ope_x - ope_c)   # más cerca del grande
+    assert ope_x == pytest.approx(15.0 / 110.0, abs=1e-3)
+
+
+def test_combinar_hojas_alineacion_anios():
+    """Componentes con horizontes distintos (3 vs 5 años) → alineación por año
+    calendario: los años sin el componente corto solo llevan el largo."""
+    corto = _sintetico()                          # 2025-2027
+    largo = _sintetico()
+    n = 5
+    largo["ACEITE_VTS_NETO"] = np.full(n, 50.0)
+    largo["GAS_VTS_NETO"] = np.zeros(n); largo["GLP_NETO"] = np.zeros(n)
+    largo["PODER_CALOR"] = np.zeros(n); largo["PRECIO_GAS"] = np.zeros(n)
+    largo["PRECIO_GLP"] = np.zeros(n)
+    largo["OPEX"]  = np.full(n, 20.0)
+    largo["CAPEX"] = np.zeros(n); largo["OTROS_ING"] = np.zeros(n)
+    largo["ANIO"]  = np.array([2025.0, 2026.0, 2027.0, 2028.0, 2029.0])
+    largo["_ult"] = n - 1; largo["_ult_oil"] = n - 1; largo["_abandono_total"] = 0.0
+
+    comb = mbk.combinar_hojas([corto, largo])
+    assert list(comb["ANIO"]) == [2025.0, 2026.0, 2027.0, 2028.0, 2029.0]
+    # 2025-2027: 100+50; 2028-2029: solo 50
+    assert np.allclose(comb["ACEITE_VTS_NETO"], [150.0, 150.0, 150.0, 50.0, 50.0])
+    assert np.allclose(comb["OPEX"], [30.0, 30.0, 30.0, 20.0, 20.0])
+    assert comb["_ult"] == 4 and comb["_ult_oil"] == 4
+
+
+def test_combinar_hojas_preserva_ingreso_gas():
+    """El ingreso de gas del combinado = suma exacta de los ingresos de gas de los
+    componentes (precio equivalente, no promedio de precios)."""
+    a = _sintetico(); b = _sintetico()
+    for d, (bg, bp, bq) in ((a, (10.0, 1.0, 4.0)), (b, (30.0, 1.2, 2.0))):
+        d["GAS_VTS_NETO"] = np.full(3, bg)
+        d["PODER_CALOR"]  = np.full(3, bp)
+        d["PRECIO_GAS"]   = np.full(3, bq)
+    ing_esperado = 10 * 1.0 * 4.0 + 30 * 1.2 * 2.0     # 40 + 72 = 112 por año
+    comb = mbk.combinar_hojas([a, b])
+    ing_comb = comb["GAS_VTS_NETO"] * comb["PODER_CALOR"] * comb["PRECIO_GAS"]
+    assert np.allclose(ing_comb, ing_esperado)
+
+
+def test_raiz_borde_siempre_rentable():
+    """Raíz pegada al borde inferior del bracket → (0.0, OK_SIEMPRE_RENTABLE):
+    el objetivo es ≥0 a cualquier precio positivo (equilibrio económico = 0)."""
+    d = _sintetico(precio_capex=0.0, abandono=0.0)
+    # fc último año = 100p − opex; con opex≈1 la raíz cae en 0.01 (= borde 0.01+xtol)
+    d["OPEX"] = np.array([1.0, 1.0, 1.0])
+    ope, msg = mbk.breakeven_operacional(d)
+    assert msg == "OK_SIEMPRE_RENTABLE", f"Esperado OK_SIEMPRE_RENTABLE, recibí {msg}"
+    assert ope == 0.0
+    # La fila del tablón NO debe marcar fallo del solver con este mensaje
+    fila = mbk._fila("x.xlsx", "X", "2025", "D-PDP", 0.0, ope, "OK", msg)
+    assert fila["SOLVER_S1_FALLO"] is False
+
+
+def test_runner_sin_duplicados_y_sin_raices_borde():
+    """Post-runner: sin >1 fila por (CAMPO,VIG,CLASE) en D-PDP/PNP/PND y sin raíces
+    clavadas en 0.01 (borde del bracket) reportadas como OK."""
+    import pandas as pd
+    pq = STAGING / "breakeven_resultados.parquet"
+    if not pq.exists():
+        pytest.skip("breakeven_resultados.parquet aún no generado")
+    df = pd.read_parquet(pq)
+    df3 = df[df["CLASE_RESERVA"].isin({"D-PDP", "D-PNP", "D-PND"})]
+    dup = df3.groupby(["CAMPO", "VIGENCIA_BREAKEVEN", "CLASE_RESERVA"]).size()
+    dup = dup[dup > 1]
+    assert dup.empty, f"Duplicados multi-FC sin combinar: {dup.index.tolist()}"
+    if "ARCHIVO_ORIGEN" in df.columns and \
+            df["ARCHIVO_ORIGEN"].str.startswith("COMBINADO").any():
+        borde = df3[
+            df3["MENSAJE_FIN"].isin({"OK"}) &
+            (df3["BREAKEVEN_FINANCIERO_USD_BBL"] <= 0.011)
+        ]
+        assert borde.empty, \
+            f"Raíces de borde 0.01 reportadas como OK: {borde['CAMPO'].tolist()}"
+
+
 # ── GATE GOLDEN (duro) ───────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("ruta", list(GOLDEN.keys()))
@@ -256,7 +361,7 @@ def test_gate_golden_financiero_operacional(ruta):
 def test_breakeven_resultados_esquema():
     """Si existe el parquet del runner: esquema correcto y sin NaN silenciosos."""
     import pandas as pd
-    pq = BASE / "datos" / "staging" / "breakeven_resultados.parquet"
+    pq = STAGING / "breakeven_resultados.parquet"
     if not pq.exists():
         pytest.skip("breakeven_resultados.parquet aún no generado (correr 05_breakeven.py)")
     df = pd.read_parquet(pq)

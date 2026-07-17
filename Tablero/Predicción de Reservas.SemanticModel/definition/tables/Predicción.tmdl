@@ -30,15 +30,6 @@ table Predicción
 
 		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
-	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
-	column 'Ambiente Clave'
-		dataType: string
-		isHidden
-		isAvailableInMdx: false
-		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005501
-		summarizeBy: none
-		sourceColumn: AMBIENTE
-
 	/// Precio Neto estimado por el Modelo 2 (α + β·Brent) al Brent del escenario. Es el Precio Neto (Brent − descuentos calidad y transporte) que recibe el campo, no el Brent.
 	column 'Precio Neto M2 (USD/bbl)'
 		dataType: double
@@ -125,32 +116,41 @@ table Predicción
 
 		annotation SummarizationSetBy = Automatic
 
-	/// Banda baja LOYO (P10) del volumen 1P. Poblada en ambos tracks desde la promoción
+	/// Track del pipeline que produjo la fila: Producción o Calidad. Clave de la dimensión Ambiente.
+	column 'Ambiente Clave'
+		dataType: string
+		isHidden
+		isAvailableInMdx: false
+		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005501
+		summarizeBy: none
+		sourceColumn: AMBIENTE
+
+	/// Banda baja LOYO (P25) del volumen 1P. Poblada en ambos tracks desde la promoción
 	/// 2026-07-15 (null solo para campos con menos de 2 vigencias reales, motor Suave, o
 	/// volumen predicho = 0 — ver 04_pbi_export.py).
-	column 'Vol P10 (MBPE)'
+	column 'Vol P25 (MBPE)'
 		dataType: double
 		formatString: #,##0.0
 		displayFolder: 1. Volúmenes
 		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005510
 		summarizeBy: sum
-		sourceColumn: VOL_P10_MBPE
+		sourceColumn: VOL_P25_MBPE
 
 		annotation SummarizationSetBy = Automatic
 
-	/// Banda alta LOYO (P90) del volumen 1P. Poblada en ambos tracks desde la promoción
-	/// 2026-07-15 (mismas excepciones que 'Vol P10 (MBPE)').
-	column 'Vol P90 (MBPE)'
+	/// Banda alta LOYO (P75) del volumen 1P. Poblada en ambos tracks desde la promoción
+	/// 2026-07-15 (mismas excepciones que 'Vol P25 (MBPE)').
+	column 'Vol P75 (MBPE)'
 		dataType: double
 		formatString: #,##0.0
 		displayFolder: 1. Volúmenes
 		lineageTag: 1f1e1d1c-1b1a-4901-8801-770066005511
 		summarizeBy: sum
-		sourceColumn: VOL_P90_MBPE
+		sourceColumn: VOL_P75_MBPE
 
 		annotation SummarizationSetBy = Automatic
 
-	/// Vol P90 - Vol P10 en el punto de la fila (ancho de la banda LOYO).
+	/// Vol P75 - Vol P25 en el punto de la fila (ancho de la banda LOYO).
 	column 'Ancho Banda LOYO (MBPE)'
 		dataType: double
 		formatString: #,##0.0
@@ -176,9 +176,10 @@ table Predicción
 				    Union = Table.Combine({Prod, Cal}),
 				    // Estrella: el CSV sigue denormalizado (compatibilidad tests/snapshots) pero el
 				    // modelo solo carga las columnas que varían por fila; el resto vive en 'Modelo Campo'/'Corrida'.
-				    Slim = Table.SelectColumns(Union, {"CAMPO", "MOTOR", "BRENT_USD_BBL", "PRECIO_NETO_EFECTIVO_USD_BBL", "DELTA_PRED_MBPE", "VOLUMEN_1P_PREDICHO_MBPE", "DELTA_VS_BASE_MBPE", "DELTA_VS_BASE_PCT", "ES_VIABLE", "ES_FULL_RESERVAS", "ES_EXTRAPOLADO", "ES_CLIPPED", "VOL_P10_MBPE", "VOL_P90_MBPE", "ANCHO_BANDA_LOYO_MBPE", "AMBIENTE"}),
-				    Tipos = Table.TransformColumnTypes(Slim, {{"CAMPO", type text}, {"MOTOR", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_EFECTIVO_USD_BBL", type number}, {"DELTA_PRED_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"DELTA_VS_BASE_MBPE", type number}, {"DELTA_VS_BASE_PCT", type number}, {"ES_VIABLE", type logical}, {"ES_FULL_RESERVAS", type logical}, {"ES_EXTRAPOLADO", type logical}, {"ES_CLIPPED", type logical}, {"VOL_P10_MBPE", type number}, {"VOL_P90_MBPE", type number}, {"ANCHO_BANDA_LOYO_MBPE", type number}, {"AMBIENTE", type text}}, "en-US")
+				    Slim = Table.SelectColumns(Union, {"CAMPO", "MOTOR", "BRENT_USD_BBL", "PRECIO_NETO_EFECTIVO_USD_BBL", "DELTA_PRED_MBPE", "VOLUMEN_1P_PREDICHO_MBPE", "DELTA_VS_BASE_MBPE", "DELTA_VS_BASE_PCT", "ES_VIABLE", "ES_FULL_RESERVAS", "ES_EXTRAPOLADO", "ES_CLIPPED", "VOL_P25_MBPE", "VOL_P75_MBPE", "ANCHO_BANDA_LOYO_MBPE", "AMBIENTE"}),
+				    Tipos = Table.TransformColumnTypes(Slim, {{"CAMPO", type text}, {"MOTOR", type text}, {"BRENT_USD_BBL", type number}, {"PRECIO_NETO_EFECTIVO_USD_BBL", type number}, {"DELTA_PRED_MBPE", type number}, {"VOLUMEN_1P_PREDICHO_MBPE", type number}, {"DELTA_VS_BASE_MBPE", type number}, {"DELTA_VS_BASE_PCT", type number}, {"ES_VIABLE", type logical}, {"ES_FULL_RESERVAS", type logical}, {"ES_EXTRAPOLADO", type logical}, {"ES_CLIPPED", type logical}, {"VOL_P25_MBPE", type number}, {"VOL_P75_MBPE", type number}, {"ANCHO_BANDA_LOYO_MBPE", type number}, {"AMBIENTE", type text}}, "en-US")
 				in
 				    Tipos
 
 	annotation PBI_ResultType = Table
+

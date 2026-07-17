@@ -23,11 +23,13 @@ import numpy as np
 import pandas as pd
 
 import motor_breakeven as mbk
+from track import sufijo_track, flag
 
+_SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR = Path(__file__).parent
-STAGING  = BASE_DIR / "datos" / "staging"
+STAGING  = BASE_DIR / "datos" / f"staging{_SUF}"
 STAGING.mkdir(parents=True, exist_ok=True)
-RESULTADOS = BASE_DIR / "resultados"
+RESULTADOS = BASE_DIR / f"resultados{_SUF}"
 RESULTADOS.mkdir(parents=True, exist_ok=True)
 
 # ── Rutas FC (externas read-only, portafolio completo) ────────────────────────
@@ -119,9 +121,9 @@ def _generar_auditoria(df_py: pd.DataFrame) -> None:
     merged["DELTA_BK_OPERACIONAL"] = merged["PY_BK_OPERACIONAL"] - merged["SOLVER_BK_OPERACIONAL"]
 
     # Resumen por hoja separada
-    fin_ok  = merged["PY_MSG_FIN"]  == "OK"
+    fin_ok  = merged["PY_MSG_FIN"].isin(mbk.MENSAJES_OK)
     sol_ok  = merged["SOLVER_MSG_BO"] == "OK"
-    ope_ok  = merged["PY_MSG_OPE"]  == "OK"
+    ope_ok  = merged["PY_MSG_OPE"].isin(mbk.MENSAJES_OK)
 
     # Comparación solo donde ambos resolvieron
     ambos_fin = merged[fin_ok & sol_ok & merged["DELTA_BK_FINANCIERO"].notna()]
@@ -173,6 +175,69 @@ def _generar_auditoria(df_py: pd.DataFrame) -> None:
         print(f"    {r['Métrica']:<55} {r['Valor']}")
 
 
+def combinar_multi_fc(filas: list[dict], con_perfil: bool = False) -> list[dict]:
+    """
+    Colapsa los duplicados (CAMPO, VIGENCIA, CLASE) que aparecen cuando un UNIFICADO
+    tiene varios archivos FC físicos (CHICHIMENE+SW, LISAMA+NUTRIA+TESORO, NARE×4...).
+
+    Directriz §4bis.3 (2026-07-11): los componentes certifican juntos → se SUMAN los
+    flujos de caja año a año (mbk.combinar_hojas) y se calcula UNA raíz sobre el FC
+    combinado. Antes, 01_etl tomaba la primera fila alfabética y botaba el resto en
+    silencio (espejo del bug coalesce v3).
+
+    Requiere filas de procesar_fc(retener_datos=True). Descarta "_DATOS" del output.
+
+    con_perfil=True (track Calidad, directriz §4bis.6): agrega columnas BK_P10..BK_P90
+    (perfil de salida volumétrico) calculadas del MISMO FC (combinado si aplica).
+    """
+    grupos: dict[tuple, list[dict]] = {}
+    for f in filas:
+        grupos.setdefault(
+            (f["CAMPO"], f["VIGENCIA_BREAKEVEN"], f["CLASE_RESERVA"]), []).append(f)
+
+    out = []
+    n_combinados = 0
+    for (campo, vig, clase), grupo in grupos.items():
+        con_datos = [f for f in grupo if f.get("_DATOS") is not None]
+        if len(grupo) == 1 or len(con_datos) <= 1:
+            # Mono-archivo, o un solo componente con reservas (el resto SIN_RESERVAS):
+            # conservar la fila con datos si existe; si no, la primera.
+            fila = con_datos[0] if con_datos else grupo[0]
+            d_uni = fila.get("_DATOS")
+            fila.pop("_DATOS", None)
+            if con_perfil and d_uni is not None:
+                fila.update(mbk.perfil_salida(d_uni))
+            out.append(fila)
+            continue
+
+        ds = [f["_DATOS"] for f in con_datos]
+        try:
+            d_comb = mbk.combinar_hojas(ds)
+        except ValueError as e:
+            print(f"    [WARN] {campo} [{vig}] {clase}: combinación falló ({e}); "
+                  f"usando el componente de mayor horizonte.")
+            d_comb = max(ds, key=lambda d: d["_ult"])
+        fin, msg_fin = mbk.breakeven_financiero(d_comb)
+        ope, msg_ope = mbk.breakeven_operacional(d_comb)
+        fila = mbk._fila(f"COMBINADO(n={len(con_datos)})", campo, vig, clase,
+                         fin, ope, msg_fin, msg_ope)
+        if con_perfil:
+            fila.update(mbk.perfil_salida(d_comb))
+        out.append(fila)
+        n_combinados += 1
+        indiv = ", ".join(f"{f['BREAKEVEN_OPERACIONAL_USD_BBL']:.1f}"
+                          if pd.notna(f['BREAKEVEN_OPERACIONAL_USD_BBL']) else "N/A"
+                          for f in con_datos)
+        ope_str = f"{ope:.2f}" if pd.notna(ope) else "N/A"
+        print(f"    [COMBINADO] {campo} [{vig}] {clase}: {len(con_datos)} FCs "
+              f"(ope indiv: {indiv}) -> ope_comb={ope_str}")
+
+    if n_combinados:
+        print(f"  [INFO] {n_combinados} grupos multi-FC combinados por suma de flujos "
+              f"(directriz §4bis.3)")
+    return out
+
+
 if __name__ == "__main__":
     print("=== 05_breakeven.py — Motor de Breakeven (Python) ===\n")
 
@@ -182,13 +247,19 @@ if __name__ == "__main__":
         print(f"  {sub}: {len(archivos)} archivos FC")
         for ruta in archivos:
             try:
-                filas.extend(mbk.procesar_fc(ruta))
+                filas.extend(mbk.procesar_fc(ruta, retener_datos=True))
             except Exception as e:
                 print(f"    [ERROR] {ruta.name}: {e}")
 
     if not filas:
         raise FileNotFoundError(
             "No se encontraron FC en rutas externas ni locales.")
+
+    print("\n  Combinando componentes multi-FC de campos UNIFICADO...")
+    _perfil = flag("PRED_PERFIL_SALIDA")
+    if _perfil:
+        print("  [CALIDAD] Perfil de salida volumétrico ON (BK_P10..BK_P90, directriz §4bis.6)")
+    filas = combinar_multi_fc(filas, con_perfil=_perfil)
 
     df = pd.DataFrame(filas)
 
@@ -202,8 +273,8 @@ if __name__ == "__main__":
     print(f"  Campos únicos: {df['CAMPO'].nunique()}")
     print(f"  Guardado: {ruta_pq}")
 
-    ok_fin = (df["MENSAJE_FIN"] == "OK").sum()
-    ok_ope = (df["MENSAJE_OPE"] == "OK").sum()
+    ok_fin = df["MENSAJE_FIN"].isin(mbk.MENSAJES_OK).sum()
+    ok_ope = df["MENSAJE_OPE"].isin(mbk.MENSAJES_OK).sum()
     print(f"\n  Financiero  OK: {ok_fin}/{len(df)}")
     print(f"  Operacional OK: {ok_ope}/{len(df)}")
     print(f"  BRENT_INSENSITIVE: {df['BRENT_INSENSITIVE'].sum()}")
@@ -212,7 +283,7 @@ if __name__ == "__main__":
           .apply(lambda s: f"{(s == 'OK').sum()}/{len(s)} OK").to_string())
 
     # Breakeven Financiero D-PDP por campo (el más relevante para CAPEX)
-    pdp = df[(df["CLASE_RESERVA"] == "D-PDP") & (df["MENSAJE_FIN"] == "OK")]
+    pdp = df[(df["CLASE_RESERVA"] == "D-PDP") & df["MENSAJE_FIN"].isin(mbk.MENSAJES_OK)]
     print(f"\n  Breakeven Financiero D-PDP (USD/bbl NET) — {pdp['CAMPO'].nunique()} campos:")
     for _, r in pdp.sort_values(["CAMPO", "VIGENCIA_BREAKEVEN"]).iterrows():
         ope_val = r['BREAKEVEN_OPERACIONAL_USD_BBL']

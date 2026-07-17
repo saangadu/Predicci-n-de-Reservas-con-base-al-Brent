@@ -9,7 +9,10 @@ ARQUITECTURA DE 2 MODELOS (directriz 2026-06-11):
     marcador Brent al precio neto que alimenta el Modelo 1. Permite Brent -> Delta por
     composicion en 04_pbi_export.py.
 
-TARGET: DELTA_SENS_MBPE = ΔReservas = Sensibilidad − Baseline_vigencia.
+TARGET: DELTA_SENS_MBPE = ΔReservas = Sensibilidad − BASELINE_1P_MBPE (cierre del año
+ANTERIOR, A−1). Desde 2026-07-09: el deck de Sensibilidad se construye sobre el último
+libro certificado disponible (cierre A−1); restar el cierre del MISMO año (Checkpoint,
+semántica previa) inyectaba el salto de recertificación A−1→A = confound de vigencia.
 
 PREDICCION FINAL CON RE-ANCLAJE (decision 2026-06-12, MAESTRO §7.0/§10):
     VOLUMEN_1P_PRED(p) = max(BASELINE_LATEST + [f(p) − f(p_ref)], 0)
@@ -49,13 +52,18 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from motores_modelo1 import MotorIsotonico, MotorSuave, volumen_anclado
+from motores_modelo1 import (MotorIsotonico, MotorSuave, MotorSigmoide,
+                             MotorLinealRobusto, MotorHuberIso, MotorFCPerfil,
+                             MotorHibrido, CANDIDATOS_HIBRIDO,
+                             piso_efectivo, volumen_anclado)
+from track import sufijo_track, flag
 
+_SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR    = Path(__file__).parent
-STAGING     = BASE_DIR / "datos" / "staging"
+STAGING     = BASE_DIR / "datos" / f"staging{_SUF}"
 MODELOS_DIR = STAGING / "modelos"
 PLOTS_DIR   = STAGING / "plots"
-RESULTADOS  = BASE_DIR / "resultados"
+RESULTADOS  = BASE_DIR / f"resultados{_SUF}"
 MODELOS_DIR.mkdir(parents=True, exist_ok=True)
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 RESULTADOS.mkdir(parents=True, exist_ok=True)
@@ -68,6 +76,81 @@ W_SINTETICO_MIN = 0.05
 # Una sola feature: el Precio Neto (el Modelo 2 traduce Brent -> Neto aguas arriba)
 FEATURE = "PRECIO_NETO_USD_BBL"
 TARGET  = "DELTA_SENS_MBPE"
+
+
+# Deck plano (directriz DIRECTRIZ_ESCALERA_DECK.md §4): un campo cuyo deck REAL no
+# responde al precio (rango de deltas < DECK_PLANO_FRAC·baseline en ≥2 vigencias). Típico
+# de campos de gas/GLP (Piedemonte/VPI: Pauto, Cupiagua Recetor) donde el ingreso fijo
+# domina. Para estos la isotónica interpola una rampa espuria en la franja SIN datos
+# entre el abandono sintético y la banda real (Pauto: −40% a Brent 60 sin ningún dato).
+# El modelo honesto es "plano hasta el abandono": Vol = baseline sobre BK_PDP, 0 debajo.
+DECK_PLANO_FRAC   = 0.02   # rango de deltas reales < 2%·baseline = insensible
+DECK_PLANO_N_MIN  = 4      # mínimo de puntos reales para afirmar planitud
+
+# Junta del modelo hibrido (investigacion 2026-07-15): donde termina el gobierno de
+# la escalera de breakevens y arranca el motor superior. Mismo ancho de transicion
+# que la escalera suavizada de 02_synthetic (s5).
+HIBRIDO_TRANSICION_USD = 6.0
+
+# Re-anclaje selectivo por confound (track Calidad, directriz §4bis.7.1). Discriminante
+# SEGURO = sesgo material Y η² alto Y materialidad. El gate dorado tiene η² alto pero
+# sesgo≈0 (su re-anclaje ya es sano) → queda fuera. La version GLOBAL de este centrado
+# fue rechazada (experimento_vigencia, aplana sensibilidad real): por eso es selectivo.
+REANCL_BASE_MIN  = 5.0     # MBPE — materialidad minima
+REANCL_ETA2_MIN  = 0.4     # el AÑO explica ≥40% de la varianza del delta
+REANCL_SESGO_MIN = 0.15    # |d_ref|/baseline > 15% = artefacto de recuperacion material
+
+
+def eta2_vigencia(df_campo: pd.DataFrame) -> float:
+    """η²: fraccion de la varianza del delta real explicada por el AÑO de vigencia.
+    Misma formula que 04_pbi_export.calcular_confound_vigencia (reproduce sus valores).
+    """
+    real = df_campo[~df_campo["ES_SINTETICO"]]
+    y = real[TARGET].dropna()
+    if len(y) < 4:
+        return np.nan
+    grp = real.loc[y.index, "VIGENCIA"].astype(str).str.slice(0, 4)
+    if grp.nunique() < 2:
+        return np.nan
+    gm = y.mean()
+    ss_tot = float(((y - gm) ** 2).sum())
+    if ss_tot <= 0:
+        return np.nan
+    ss_between = sum(len(sub) * (sub.mean() - gm) ** 2 for _, sub in y.groupby(grp))
+    return float(ss_between / ss_tot)
+
+
+def centrar_vigencias(df_campo: pd.DataFrame, fraccion: float = 1.0) -> pd.DataFrame:
+    """Centra los deltas REALES por vigencia: quita el offset entre decks (recertificacion
+    inter-cierre) y conserva la pendiente intra-vigencia (la respuesta real al precio).
+    Sinteticos intactos. Re-anclaje selectivo por confound (directriz §4bis.7.1).
+
+    fraccion (centrado PARCIAL, s9): cuanto del offset se remueve. 1.0 = centrado total
+    (re-anclaje clasico). fraccion = η² = shrinkage tipo empirical-Bayes: se quita solo
+    la fraccion de offset que la evidencia atribuye al AÑO — para casos frontera donde
+    precio y año estan mezclados (CASABE η²=0.44) y el centrado total borra señal real."""
+    out = df_campo.copy()
+    real = out[~out["ES_SINTETICO"]]
+    y = real[TARGET]
+    grp = real["VIGENCIA"].astype(str).str.slice(0, 4)
+    offset = grp.map(y.groupby(grp).mean()) - y.mean()
+    out.loc[real.index, TARGET] = (y - fraccion * offset).values
+    return out
+
+
+def es_deck_plano(df_campo: pd.DataFrame, baseline: float) -> bool:
+    """True si el deck real del campo es insensible al precio (directriz §4)."""
+    if pd.isna(baseline) or baseline <= 0:
+        return False
+    reales = df_campo[~df_campo["ES_SINTETICO"]]
+    deltas = reales[TARGET].dropna()
+    if len(deltas) < DECK_PLANO_N_MIN:
+        return False
+    n_vig = reales.loc[deltas.index, "VIGENCIA"].astype(str).str.slice(0, 4).nunique()
+    if n_vig < 2:
+        return False
+    rango = float(deltas.max() - deltas.min())
+    return rango < DECK_PLANO_FRAC * float(baseline)
 
 
 def peso_sintetico(n_real: int, n_sint: int) -> float:
@@ -232,6 +315,40 @@ def loyo_cv_por_vigencia(df_campo: pd.DataFrame) -> tuple:
     return mae_loyo, mae_naive_loyo, skill_loyo, len(anios_unicos)
 
 
+def residuales_loyo(df_campo: pd.DataFrame, factory=MotorIsotonico) -> np.ndarray:
+    """Residuales FIRMADOS del LOYO (y_real − y_pred) para las bandas de incertidumbre
+    (track Calidad, s9): cuanto se desvió el delta real del año no visto respecto a lo
+    que la curva (entrenada sin ese año) predijo. Cuantiles P10/P90 de estos residuales
+    = banda empírica honesta alrededor de la curva. Mismo protocolo que
+    loyo_cv_por_vigencia (train = sintéticos + otros años). Vacío si <2 vigencias.
+
+    factory: constructor del motor a evaluar. Default isotónica (champion); para
+    campos con híbrido adoptado (2026-07-15) la banda se recalcula CON el híbrido —
+    la incertidumbre publicada debe reflejar el modelo realmente servido."""
+    df_real = df_campo[~df_campo["ES_SINTETICO"]].reset_index(drop=True)
+    df_sint = df_campo[df_campo["ES_SINTETICO"]].reset_index(drop=True)
+    n_real = len(df_real)
+    anios = df_real["VIGENCIA"].astype(str).str.slice(0, 4)
+    uni = sorted(anios.unique())
+    if n_real < 2 or len(uni) < 2:
+        return np.array([])
+    x_s = df_sint[FEATURE].values if len(df_sint) else np.empty(0)
+    y_s = df_sint[TARGET].values if len(df_sint) else np.empty(0)
+    w_s = pesos_sinteticos_tramo(df_sint, n_real)[0] if len(df_sint) else np.empty(0)
+    resid = []
+    for a in uni:
+        te = (anios == a).values
+        tr = ~te
+        if tr.sum() < 2:
+            continue
+        x_t = np.concatenate([x_s, df_real.loc[tr, FEATURE].values]) if len(x_s) else df_real.loc[tr, FEATURE].values
+        y_t = np.concatenate([y_s, df_real.loc[tr, TARGET].values]) if len(y_s) else df_real.loc[tr, TARGET].values
+        w_t = np.concatenate([w_s, np.ones(tr.sum())]) if len(w_s) else np.ones(tr.sum())
+        y_h = factory().fit(x_t, y_t, sample_weight=w_t).predict(df_real.loc[te, FEATURE].values)
+        resid.extend((df_real.loc[te, TARGET].values - np.asarray(y_h)).tolist())
+    return np.array(resid)
+
+
 def entrenar_final_campo(df_campo: pd.DataFrame) -> tuple:
     """Entrena los modelos finales con TODOS los datos (reales + sinteticos), en Precio
     Neto. Pesos sinteticos balanceados por nivel; los reales pesan 1.0.
@@ -248,6 +365,110 @@ def entrenar_final_campo(df_campo: pd.DataFrame) -> tuple:
     m_iso   = MotorIsotonico().fit(x, y, sample_weight=pesos)
     m_suave = MotorSuave().fit(x, y, sample_weight=pesos)
     return m_iso, m_suave
+
+
+def _perfil_de_campo(df_campo: pd.DataFrame) -> dict:
+    """BK_P10..90 del campo desde el tablon (solo presente en track Calidad con perfil)."""
+    out = {}
+    for pct in (10, 25, 50, 75, 90):
+        col = f"BK_P{pct}"
+        if col in df_campo.columns:
+            v = df_campo[col].dropna()
+            if len(v):
+                out[pct] = float(v.iloc[0])
+    return out
+
+
+def p_junta_campo(df_campo: pd.DataFrame) -> float:
+    """Junta del hibrido POR CAMPO (no constante global — en campos con BK alto,
+    ej. CAÑO SUR, la junta puede caer dentro del rango real y debe validarse):
+    max(techo de la banda BK + transicion, ultimo precio sintetico) = donde termina
+    la evidencia sintetica que gobierna la escalera."""
+    bk_fin, _, _ = _anclas_campo(df_campo)
+    sint = df_campo[df_campo["ES_SINTETICO"]]
+    p_sint_max = float(sint[FEATURE].max()) if len(sint) else np.nan
+    candidatos = [v for v in ((bk_fin + HIBRIDO_TRANSICION_USD
+                               if bk_fin is not None else np.nan), p_sint_max)
+                  if pd.notna(v)]
+    return max(candidatos) if candidatos else np.nan
+
+
+# Dispatch de motor por metodo (track Calidad, PRED_SELECCION_METODO). El default es la
+# isotonica sobre la escalera vigente (perfil si PRED_PERFIL_SALIDA). reanclaje se maneja
+# como transform (centrar) + isotonica; FCPerfil ignora los datos (curva del FC);
+# hibrido:<motor> = escalera abajo + motor superior arriba (investigacion 2026-07-15).
+def entrenar_con_metodo(df_campo, metodo, baseline, bk_sup, bk_inf,
+                        metodo_validacion: str = None, p_junta: float = None):
+    """Entrena el par (primario, validacion).
+    Primario = metodo seleccionado (hibrido:* | Sigmoide | … | default isotonica).
+    Validacion = METODO_VALIDACION del registro (2.o mejor LOYO, s12); si no hay,
+    cae a Suave (comportamiento clasico Isotonica+Suave)."""
+    x = df_campo[FEATURE].values
+    y = df_campo[TARGET].values
+    es_sint = df_campo["ES_SINTETICO"].values
+    n_real = int((~es_sint).sum())
+    pesos = np.ones(len(df_campo))
+    if es_sint.any():
+        pesos[es_sint] = pesos_sinteticos_tramo(df_campo[es_sint], n_real)[0]
+
+    # Primario
+    if metodo.startswith("hibrido:"):
+        nombre_sup = metodo.split(":", 1)[1]
+        pj = p_junta if pd.notna(p_junta) else p_junta_campo(df_campo)
+        if nombre_sup in CANDIDATOS_HIBRIDO and pd.notna(pj):
+            iso = MotorHibrido(CANDIDATOS_HIBRIDO[nombre_sup], pj) \
+                .fit(x, y, sample_weight=pesos)
+        else:
+            iso = MotorIsotonico().fit(x, y, sample_weight=pesos)
+    elif metodo == "FCPerfil":
+        per = _perfil_de_campo(df_campo)
+        if per and pd.notna(bk_sup) and pd.notna(bk_inf) and bk_sup > bk_inf:
+            iso = MotorFCPerfil(per, baseline, bk_sup, bk_inf).fit(x, y)
+        else:
+            iso = MotorIsotonico().fit(x, y, sample_weight=pesos)
+    elif metodo == "Sigmoide":
+        iso = MotorSigmoide().fit(x, y, sample_weight=pesos)
+    elif metodo == "LinealRobusto":
+        iso = MotorLinealRobusto().fit(x, y, sample_weight=pesos)
+    elif metodo == "HuberIso":
+        iso = MotorHuberIso().fit(x, y, sample_weight=pesos)
+    else:
+        iso = MotorIsotonico().fit(x, y, sample_weight=pesos)
+
+    # Validacion: 2.o mejor del ranking (s12) o Suave por defecto
+    import seleccion_reglas as R
+    if metodo_validacion and str(metodo_validacion).strip() not in ("", "nan", "None"):
+        pj = p_junta if pd.notna(p_junta) else p_junta_campo(df_campo)
+        factory_v = R.factory_desde_metodo(str(metodo_validacion), pj)
+        suave = factory_v().fit(x, y, sample_weight=pesos)
+    else:
+        suave = MotorSuave().fit(x, y, sample_weight=pesos)
+    return iso, suave
+
+
+def cargar_registro_seleccion() -> dict:
+    """Lee resultados_calidad/seleccion_metodos.csv → {campo: dict}.
+
+    Gobernanza por track (2026-07-15): Produccion solo aplica ESTADO=ADOPTADO
+    (metodos ratificados por finanzas); el track Calidad tambien aplica
+    ADOPTADO_CALIDAD (hibridos/M2 con evidencia >5% s12 + checks fisicos,
+    pendientes de ratificacion). Cada valor incluye METODO y opcionalmente
+    METODO_VALIDACION (2.o mejor LOYO, s12)."""
+    ruta = BASE_DIR / "resultados_calidad" / "seleccion_metodos.csv"
+    if not ruta.exists():
+        return {}
+    reg = pd.read_csv(ruta)
+    estados = {"ADOPTADO"} if not _SUF else {"ADOPTADO", "ADOPTADO_CALIDAD"}
+    reg = reg[reg["ESTADO"].isin(estados)]
+    out = {}
+    for _, r in reg.iterrows():
+        out[r["CAMPO"]] = {
+            "METODO": r["METODO"],
+            "METODO_VALIDACION": r.get("METODO_VALIDACION", None)
+            if "METODO_VALIDACION" in reg.columns else None,
+            "MEJORA_PCT": r.get("MEJORA_PCT", None),
+        }
+    return out
 
 
 def _anclas_campo(df_campo: pd.DataFrame) -> tuple:
@@ -281,7 +502,8 @@ def generar_plot(campo: str, df_campo: pd.DataFrame,
                  baseline_pdp: float = 0.0,
                  p_ref: float = None,
                  delta_ref_iso: float = 0.0,
-                 delta_ref_su: float = 0.0) -> None:
+                 delta_ref_su: float = 0.0,
+                 p_junta: float = None) -> None:
     """
     Plot de validacion. Eje X = PRECIO NETO (la variable nativa del Modelo 1). Eje X
     superior secundario = Brent equivalente usando las medianas de descuento del campo
@@ -339,6 +561,10 @@ def generar_plot(campo: str, df_campo: pd.DataFrame,
                         label=f"BK_pdp={bk_pdp:.1f} (abandono)")
             ax1.scatter([bk_pdp], [delta_escalon], color="firebrick",
                         marker="v", s=90, zorder=6)
+    # Junta del hibrido (si aplica): frontera escalera <-> motor superior
+    if p_junta is not None and pd.notna(p_junta):
+        ax1.axvline(x=p_junta, color="purple", linestyle="-.", linewidth=1.3,
+                    alpha=0.8, label=f"Junta hibrido={p_junta:.1f}")
     ax1.axhline(y=0, color="black", linewidth=0.5, alpha=0.4)
     ax1.set_xlabel("Precio Neto (USD/bbl)")
     ax1.set_ylabel("ΔReservas 1P (MBPE)")
@@ -376,6 +602,8 @@ def generar_plot(campo: str, df_campo: pd.DataFrame,
                 ax2.axhline(y=baseline_pdp, color="firebrick", linewidth=0.8,
                             linestyle="--", alpha=0.5,
                             label=f"Nivel PDP={baseline_pdp:.0f}")
+    if p_junta is not None and pd.notna(p_junta):
+        ax2.axvline(x=p_junta, color="purple", linestyle="-.", linewidth=1.3, alpha=0.8)
     ax2.set_xlabel("Precio Neto (USD/bbl)")
     ax2.set_ylabel("Volumen 1P (MBPE)")
     ax2.set_title(f"{campo} — Volumen absoluto (baseline + delta)")
@@ -528,29 +756,75 @@ if __name__ == "__main__":
                      .groupby("CAMPO")["VOLUMEN_PDP_MBPE"]
                      .last().to_dict())
 
-    # ── Re-anclaje (2026-06-12): p_ref por campo = M2(BRENT_REF) ─────────────
-    # BRENT_REF = Brent del ultimo quarter CON RESERVAS del Consolidado (2026-07-06).
-    # El loop rodante recibe el PRECIO de un quarter antes que sus RESERVAS: un
-    # quarter con precio pero sin reservas (TARGET_NULO) es el objetivo a predecir,
-    # NO el punto de anclaje. El ancla Vol(BRENT_REF)=baseline solo es coherente si
-    # precio y reservas certificadas son del MISMO quarter (el ultimo con reservas).
+    # ── Re-anclaje (2026-06-12; BRENT_REF re-definido 2026-07-09): p_ref = M2(BRENT_REF) ──
+    # BRENT_REF = Brent OFICIAL de cierre del ultimo año certificado (68.64 = cierre 2025).
+    # El ancla exige Vol(BRENT_REF) = baseline = 1P OFICIAL del ultimo cierre (VOLUMEN_1P_
+    # OFICIAL, mismo año). Ese volumen se certifico bajo el deck SEC de ese cierre, cuyo
+    # Brent es el oficial del año — NO el Brent del deck de Sensibilidad del quarter
+    # siguiente (2026_Q1 = 68.01), que es un pronostico. Usar el Brent del quarter mezclaba
+    # precio de vigencia 2026 con volumen de cierre 2025 (mismo tipo de mezcla de vigencias
+    # que la normalizacion v2 elimino). round(·,2) ANTES de p_ref: 04 inserta
+    # round(BRENT_REF,2) en la grilla — si p_ref usa mas precision la isotonica (step) puede
+    # caer en otro escalon y romper la identidad Vol(BRENT_REF)=baseline por un escalon.
     ruta_m2 = STAGING / "correlacion_brent.csv"
     if not ruta_m2.exists():
         raise FileNotFoundError(
             "correlacion_brent.csv no existe: ejecutar 03b_correlacion_brent.py ANTES "
             "de 03_modelo.py (orden del pipeline desde 2026-06-12).")
-    coef_m2 = pd.read_csv(ruta_m2).set_index("CAMPO")[["ALPHA", "BETA"]].to_dict("index")
-    df_q = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"])
-              & df["BRENT_FLAT_USD_BBL"].notna() & df["VIGENCIA"].notna()
-              & df["VOLUMEN_1P_SENSIBILIDAD_MBPE"].notna()]
-    if df_q.empty:
-        raise ValueError("Sin quarters Consolidado con reservas en el tablon: no se puede fijar BRENT_REF.")
-    # VIGENCIA "YYYY_Qn" ordena lexicograficamente; el ultimo quarter CON RESERVAS es el ancla
-    BRENT_REF = float(df_q.sort_values("VIGENCIA")["BRENT_FLAT_USD_BBL"].iloc[-1])
-    VIGENCIA_REF = str(df_q["VIGENCIA"].max())
-    p_ref_campo = {c: v["ALPHA"] + v["BETA"] * BRENT_REF for c, v in coef_m2.items()}
-    print(f"Re-anclaje: BRENT_REF={BRENT_REF:.2f} USD/bbl (quarter {VIGENCIA_REF}); "
+    # Fila COMPLETA de correlacion_brent.csv por campo: neto_desde_brent respeta la
+    # familia M2 adoptada (M2_PARAMS, investigacion 2026-07-15) y cae a ALPHA+BETA
+    # lineal cuando no hay adopcion — misma conversion que usara 04_pbi_export.
+    import importlib
+    _m2 = importlib.import_module("03b_correlacion_brent")
+    coef_m2 = {r["CAMPO"]: r.to_dict() for _, r in pd.read_csv(ruta_m2).iterrows()}
+    df_cierre = df[df["ES_BASELINE"] & df["BRENT_FLAT_USD_BBL"].notna()
+                   & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
+    if df_cierre.empty:
+        raise ValueError("Sin cierres oficiales con Brent en el tablon: no se puede fijar BRENT_REF.")
+    anio_cierre = int(df_cierre["AÑO"].max())
+    # Brent oficial es unico por año (igual para todos los campos): mediana como guard.
+    BRENT_REF = round(float(df_cierre.loc[df_cierre["AÑO"] == anio_cierre,
+                                          "BRENT_FLAT_USD_BBL"].median()), 2)
+    VIGENCIA_REF = str(anio_cierre)
+    p_ref_campo = {c: float(_m2.neto_desde_brent(v, [BRENT_REF])[0])
+                   for c, v in coef_m2.items()}
+    print(f"Re-anclaje: BRENT_REF={BRENT_REF:.2f} USD/bbl (cierre oficial {VIGENCIA_REF}); "
           f"p_ref por campo via Modelo 2.\n")
+
+    usar_reanclaje = flag("PRED_REANCLAJE_CONFOUND")
+    reanclados = []
+    if usar_reanclaje:
+        print("  [CALIDAD] Re-anclaje selectivo por confound ON "
+              "(sesgo>15% & eta2>=0.4 & baseline>=5, directriz 4bis.7.1)\n")
+
+    # Seleccion de metodo por campo (track Calidad): el registro seleccion_metodos.csv
+    # gobierna el motor/transform por campo. Cuando esta ON, el registro sustituye la
+    # deteccion automatica de confound (registro_sel puede incluir 'reanclaje').
+    usar_seleccion = flag("PRED_SELECCION_METODO")
+    usar_bandas = flag("PRED_BANDAS_LOYO")
+    if usar_bandas:
+        print("  [CALIDAD] Bandas de incertidumbre LOYO ON (residuales P10/P90 -> export)\n")
+    registro_sel = cargar_registro_seleccion() if usar_seleccion else {}
+    registro_mae = {}
+    if usar_seleccion:
+        _rp = BASE_DIR / "resultados_calidad" / "seleccion_metodos.csv"
+        if not _rp.exists() and not _SUF:
+            # Flag ratificado y ON por defecto en Produccion (track.py): el registro es
+            # un insumo gobernado, no un artefacto derivado. Sin el, la seleccion cae
+            # en {} en silencio y los conteos NORTE quedan mal sin aviso.
+            raise FileNotFoundError(
+                f"PRED_SELECCION_METODO esta ON en Produccion pero falta {_rp}. "
+                "El registro de seleccion es un insumo gobernado (ver MAESTRO §10) — "
+                "no se puede correr Produccion sin el.")
+        if _rp.exists():
+            _r = pd.read_csv(_rp)
+            # Misma gobernanza por track que cargar_registro_seleccion()
+            _estados = {"ADOPTADO"} if not _SUF else {"ADOPTADO", "ADOPTADO_CALIDAD"}
+            _r = _r[_r["ESTADO"].isin(_estados)]
+            registro_mae = dict(zip(_r["CAMPO"], _r["MAE_LOYO_METODO"]))
+        print(f"  [CALIDAD] Seleccion de metodo por campo ON "
+              f"({len(registro_sel)} overrides: "
+              f"{', '.join(sorted({v['METODO'] for v in registro_sel.values()}))})\n")
 
     registros = []
     registros_sanity = []   # persistencia G1 (NORTE): CAMPO x CHECK x PASS
@@ -567,6 +841,13 @@ if __name__ == "__main__":
 
         print(f"  Datos: {len(df_campo)} filas ({n_real} reales delta + {n_sint} sinteticos)")
         print(f"  Baseline latest: {baseline_latest:.2f} MBPE")
+
+        # Deck plano (directriz §4): campo insensible al precio segun su deck REAL.
+        # 04_pbi_export usa este flag para servir curva plana (sin rampa isotonica
+        # interpolada en la franja sin datos).
+        deck_plano = es_deck_plano(df_campo, baseline_latest)
+        if deck_plano:
+            print(f"  [DECK_PLANO] deck insensible al precio -> curva plana en export")
 
         if n_real < 2 and n_sint < 2:
             print(f"  [SKIP] Sin datos suficientes (reales={n_real}, sinteticos={n_sint})")
@@ -612,7 +893,33 @@ if __name__ == "__main__":
                       f"(LOO x{infl:.1f})  SKILL_LOYO={skill_loyo:.3f}  [REFERENCIAL]")
 
         print(f"\n  Entrenando modelos finales (reales + sinteticos)...")
-        iso_m, suave_m = entrenar_final_campo(df_campo)
+        # registro_sel[campo] es dict {METODO, METODO_VALIDACION} (s12) o ausente
+        _sel = registro_sel.get(campo) if usar_seleccion else None
+        metodo_campo = _sel["METODO"] if isinstance(_sel, dict) else (
+            _sel if _sel else "default")
+        metodo_valid = (_sel.get("METODO_VALIDACION") if isinstance(_sel, dict)
+                        else None)
+        if pd.isna(metodo_valid) if metodo_valid is not None else True:
+            metodo_valid = None
+        bk_fin_sel, bk_pdp_sel, _ = _anclas_campo(df_campo)
+        if metodo_campo == "reanclaje":
+            # transform: centrar por vigencia antes de ajustar (mismo mecanismo confound)
+            df_campo = centrar_vigencias(df_campo)
+            df_sint_campo = df_campo[df_campo["ES_SINTETICO"]]
+        if metodo_campo != "default":
+            pj_sel = p_junta_campo(df_campo) if str(metodo_campo).startswith("hibrido:") \
+                else None
+            iso_m, suave_m = entrenar_con_metodo(
+                df_campo, metodo_campo, baseline_latest, bk_fin_sel, bk_pdp_sel,
+                metodo_validacion=metodo_valid, p_junta=pj_sel)
+            print(f"  [CALIDAD][SELECCION] primario={metodo_campo}"
+                  + (f"  validacion={metodo_valid}" if metodo_valid else ""))
+            # La metrica de record del metodo elegido es el A/B riguroso del benchmark
+            if campo in registro_mae and pd.notna(registro_mae[campo]):
+                mae_loyo = float(registro_mae[campo])
+        else:
+            iso_m, suave_m = entrenar_final_campo(df_campo)
+            metodo_valid = "Suave"  # default historico
 
         slug = campo.replace(" ", "_")
         joblib.dump(iso_m,   MODELOS_DIR / f"{slug}_iso.joblib")
@@ -628,6 +935,46 @@ if __name__ == "__main__":
             delta_ref_su  = float(suave_m.predict([p_ref])[0])
             print(f"  Re-anclaje: p_ref={p_ref:.2f}  delta_ref ISO={delta_ref_iso:.2f}  "
                   f"SUAVE={delta_ref_su:.2f}")
+
+        # ── Re-anclaje selectivo por confound (track Calidad, directriz §4bis.7.1) ──
+        # Cuando la SELECCION por campo esta ON, el registro gobierna (puede incluir
+        # 'reanclaje'); se desactiva la deteccion automatica para no aplicarla dos veces.
+        reancl = (metodo_campo == "reanclaje")
+        sesgo0 = (abs(delta_ref_iso) / baseline_latest
+                  if pd.notna(baseline_latest) and baseline_latest > 0 else np.nan)
+        eta2_c = eta2_vigencia(df_campo)
+        if (usar_reanclaje and not usar_seleccion
+                and pd.notna(baseline_latest) and baseline_latest >= REANCL_BASE_MIN
+                and pd.notna(eta2_c) and eta2_c >= REANCL_ETA2_MIN
+                and pd.notna(sesgo0) and sesgo0 > REANCL_SESGO_MIN):
+            # Centrar por vigencia y RE-ENTRENAR: la curva pierde el escalon de deck y
+            # conserva solo la pendiente intra-vigencia (elasticidad real ≈ 0 aqui).
+            df_campo = centrar_vigencias(df_campo)
+            df_sint_campo = df_campo[df_campo["ES_SINTETICO"]]
+            iso_m, suave_m = entrenar_final_campo(df_campo)
+            joblib.dump(iso_m,   MODELOS_DIR / f"{slug}_iso.joblib")
+            joblib.dump(suave_m, MODELOS_DIR / f"{slug}_suave.joblib")
+            if n_real >= 2:
+                r2i, maei, rmsei, mei, r2s, maes, rmses, mes, mae_naive = \
+                    loo_cv_solo_reales(df_campo)
+                skill_i = 1 - maei / mae_naive if pd.notna(maei) and mae_naive > 0.01 else np.nan
+                skill_s = 1 - maes / mae_naive if pd.notna(maes) and mae_naive > 0.01 else np.nan
+                mae_loyo, mae_naive_loyo, skill_loyo, n_vig_loyo = \
+                    loyo_cv_por_vigencia(df_campo)
+            if p_ref is not None:
+                delta_ref_iso = float(iso_m.predict([p_ref])[0])
+                delta_ref_su  = float(suave_m.predict([p_ref])[0])
+            sesgo1 = (abs(delta_ref_iso) / baseline_latest if baseline_latest > 0 else np.nan)
+            reancl = True
+            reanclados.append({"CAMPO": campo, "ETA2": round(eta2_c, 3),
+                               "SESGO_ANTES": round(sesgo0, 3),
+                               "SESGO_DESPUES": round(sesgo1, 3),
+                               "BASELINE": round(baseline_latest, 1),
+                               "MAE_LOYO": round(mae_loyo, 2) if pd.notna(mae_loyo) else None})
+            print(f"  [CALIDAD][REANCLADO_CONFOUND] eta2={eta2_c:.2f}  "
+                  f"sesgo {sesgo0:.0%}->{sesgo1:.0%}  MAE_LOYO={mae_loyo:.2f}"
+                  if pd.notna(mae_loyo) else
+                  f"  [CALIDAD][REANCLADO_CONFOUND] eta2={eta2_c:.2f}  sesgo {sesgo0:.0%}->{sesgo1:.0%}")
 
         # ── Sanity checks ─────────────────────────────────────────────────────
         bk_fin, bk_pdp, vbk_campo = _anclas_campo(df_campo)
@@ -653,25 +1000,32 @@ if __name__ == "__main__":
                 registros_sanity.append({"CAMPO": campo, "CHECK": chk, "PASS": bool(ok)})
 
         # C5/C6 — invariantes del re-anclaje (sobre la reconstruccion anclada)
+        # H1 (auditoria 2026-07-07): con piso_efectivo() el ancla se cumple SIEMPRE
+        # (ya no existe la excepcion p_ref < bk_pdp: ese BK esta falsificado por la
+        # certificacion y se capa). C6 se evalua bajo el piso EFECTIVO.
         if p_ref is not None and pd.notna(baseline_latest):
             _bk = bk_pdp if bk_fin is not None else None
             v_ref = float(volumen_anclado(iso_m, [p_ref], baseline_latest,
-                                          delta_ref_iso, _bk)[0])
-            c5 = abs(v_ref - max(baseline_latest, 0)) < 1e-6 or \
-                 (_bk is not None and p_ref < _bk)
+                                          delta_ref_iso, _bk, p_ref=p_ref)[0])
+            c5 = abs(v_ref - max(baseline_latest, 0)) < 1e-6
             print(f"  C5 Vol(p_ref)=baseline: {'PASS' if c5 else 'FAIL'} "
                   f"(vol={v_ref:.2f} vs baseline={baseline_latest:.2f})")
-            if _bk is not None:
-                v0 = float(volumen_anclado(iso_m, [_bk - 5.0], baseline_latest,
-                                           delta_ref_iso, _bk)[0])
-                print(f"  C6 Vol(bk_pdp-5)=0: {'PASS' if v0 == 0.0 else 'FAIL'} "
+            _bk_eff = piso_efectivo(_bk, p_ref, baseline_latest)
+            if _bk_eff is not None:
+                v0 = float(volumen_anclado(iso_m, [_bk_eff - 5.0], baseline_latest,
+                                           delta_ref_iso, _bk, p_ref=p_ref)[0])
+                print(f"  C6 Vol(piso_efectivo-5)=0: {'PASS' if v0 == 0.0 else 'FAIL'} "
                       f"(vol={v0:.2f})")
 
         # ── Plot ──────────────────────────────────────────────────────────────
         print()
+        # Junta visible en el plot solo para campos con hibrido adoptado
+        _pj_plot = (p_junta_campo(df_campo)
+                    if metodo_campo.startswith("hibrido:") else None)
         generar_plot(campo, df_campo, iso_m, suave_m, medianas, baseline_latest,
                      baseline_pdp, p_ref=p_ref,
-                     delta_ref_iso=delta_ref_iso, delta_ref_su=delta_ref_su)
+                     delta_ref_iso=delta_ref_iso, delta_ref_su=delta_ref_su,
+                     p_junta=_pj_plot)
 
         # ── Predicciones en el tablon (en Precio Neto) ────────────────────────
         mask_c = df["CAMPO"] == campo
@@ -682,9 +1036,9 @@ if __name__ == "__main__":
             x_in = df_pred.loc[mask_feat, FEATURE].values
             _bk_rec = bk_pdp if bk_fin is not None else None
             df.loc[mask_c & mask_feat, "PRED_ISOTONICA_MBPE"] = volumen_anclado(
-                iso_m, x_in, baseline_latest, delta_ref_iso, _bk_rec)
+                iso_m, x_in, baseline_latest, delta_ref_iso, _bk_rec, p_ref=p_ref)
             df.loc[mask_c & mask_feat, "PRED_SUAVE_MBPE"] = volumen_anclado(
-                suave_m, x_in, baseline_latest, delta_ref_su, _bk_rec)
+                suave_m, x_in, baseline_latest, delta_ref_su, _bk_rec, p_ref=p_ref)
 
         mask_vol = mask_c & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()
         df.loc[mask_vol, "DELTA_ISOTONICA_VS_OFICIAL"] = (
@@ -743,7 +1097,46 @@ if __name__ == "__main__":
                                       if pd.notna(maei) and maei > 0 else None,
             "ALERTA_LOO_OUTLIER_ISO": bool(rmsei / maei > 2.0)
                                       if pd.notna(maei) and maei > 0 else False,
+            # Deck plano (directriz §4): 04_pbi_export sirve curva plana para estos campos
+            "DECK_PLANO":         bool(deck_plano),
+            # Re-anclaje selectivo por confound (track Calidad, directriz §4bis.7.1)
+            "REANCLADO_CONFOUND": bool(reancl),
+            # Metodo seleccionado por campo (track Calidad, PRED_SELECCION_METODO)
+            "METODO_SELECCIONADO": metodo_campo,
+            # s12: primario + validacion dinamica (2.o mejor LOYO); default = Suave
+            "METODO_PRIMARIO":     metodo_campo if metodo_campo != "default" else "Isotonica",
+            "METODO_VALIDACION":   metodo_valid if metodo_valid else "Suave",
         })
+
+        # Divergencia primario vs validacion en banda real (s12; sanity C4 generalizado)
+        _pnet_r = df_campo.loc[~df_campo["ES_SINTETICO"], FEATURE].values
+        if len(_pnet_r) >= 2 and pd.notna(baseline_latest):
+            import seleccion_reglas as _R
+            registros[-1]["DIVERGENCIA_PRIMARIO_VALID_PCT"] = round(
+                100.0 * _R.divergencia_volumen(iso_m, suave_m, baseline_latest, _pnet_r),
+                2)
+
+        # Bandas de incertidumbre LOYO (track Calidad, s9): cuantiles empiricos de los
+        # residuales firmados sobre el df_campo VIGENTE (post-centrado si aplico) —
+        # la banda refleja el tratamiento realmente usado por la curva final.
+        # Con hibrido adoptado (2026-07-15) la banda se recalcula CON el hibrido.
+        if usar_bandas:
+            if metodo_campo.startswith("hibrido:"):
+                _nombre_sup = metodo_campo.split(":", 1)[1]
+                _pj = p_junta_campo(df_campo)
+                if _nombre_sup in CANDIDATOS_HIBRIDO and pd.notna(_pj):
+                    _factory_bandas = (lambda f=CANDIDATOS_HIBRIDO[_nombre_sup],
+                                       pj=_pj: MotorHibrido(f, pj))
+                else:
+                    _factory_bandas = MotorIsotonico
+            else:
+                _factory_bandas = MotorIsotonico
+            _res = residuales_loyo(df_campo, factory=_factory_bandas)
+            if len(_res) >= 2:
+                # P25/P75 (s13): con N~3 vigencias los cuantiles 10/90 degeneran en
+                # min/max de los residuales — cuartiles interiores son defendibles.
+                registros[-1]["LOYO_RESID_P25"] = round(float(np.quantile(_res, 0.25)), 4)
+                registros[-1]["LOYO_RESID_P75"] = round(float(np.quantile(_res, 0.75)), 4)
         print()
 
     # ── Metricas ──────────────────────────────────────────────────────────────
@@ -751,6 +1144,16 @@ if __name__ == "__main__":
     df_met.to_csv(STAGING / "metricas.csv", index=False, encoding="utf-8-sig")
     df_met.to_csv(RESULTADOS / "metricas.csv", index=False, encoding="utf-8-sig")
     print(f"\n  Matriz de metricas: {RESULTADOS / 'metricas.csv'}")
+
+    if usar_reanclaje:
+        if reanclados:
+            df_re = pd.DataFrame(reanclados)
+            df_re.to_csv(RESULTADOS / "reanclaje_confound.csv", index=False, encoding="utf-8-sig")
+            print(f"\n  [CALIDAD] Re-anclados por confound ({len(reanclados)}): "
+                  f"{RESULTADOS / 'reanclaje_confound.csv'}")
+            print(df_re.to_string(index=False))
+        else:
+            print("\n  [CALIDAD] Ningun campo cumplio el criterio de re-anclaje por confound.")
 
     # ── Sanity checks persistidos (G1 NORTE) ──────────────────────────────────
     df_sanity = pd.DataFrame(registros_sanity)
@@ -783,6 +1186,30 @@ if __name__ == "__main__":
     print(f"\n{'=' * 50}")
     print("PARETO top-10 por reservas 1P (sin filiales / brent-insensitive / sin BK):")
     print(df_pareto[cols_pareto].to_string(index=False))
+
+    # ── Tramo de vigilancia (pareto 10-20) — gobierno de calidad, SIN gate duro ───
+    # Artifact 8a8f2cbc Nivel 3 (2026-07-10): la materialidad media (10-30 MBPE) es
+    # donde el modelo es mas debil y el gate-9 lo oculta. Se listan aparte con la
+    # metrica de sesgo de recuperacion (|d_ref|/baseline) y los errores LOO/LOYO para
+    # auditoria. NO se convierten en gate duro: NORTE (test_norte.py) no los evalua,
+    # este CSV es solo reporte de vigilancia (candidatos: NARE, LISAMA, RECETOR...).
+    df_rank = df_met[
+        (~_es_filial)
+        & ~df_met["CAMPO"].map(_insens).fillna(False).astype(bool)
+        & (df_met["N_SINTETICOS"] > 0)
+    ].nlargest(20, "BASELINE_LATEST").reset_index(drop=True)
+    df_rank["RANK_PARETO"] = df_rank.index + 1
+    df_rank["SESGO_RECUP"] = (df_rank["DELTA_REF_ISO"].abs() /
+                              df_rank["BASELINE_LATEST"].replace(0, np.nan)).round(4)
+    df_vigilancia = df_rank[df_rank["RANK_PARETO"] > 10].copy()
+    cols_vig = ["RANK_PARETO", "CAMPO", "BASELINE_LATEST", "SESGO_RECUP",
+                "MAE_REL_ISO", "SKILL_ISO", "MAE_LOYO_ISO", "SKILL_LOYO_ISO",
+                "PNETO_DELTA0_ISO"]
+    df_vigilancia[cols_vig].to_csv(STAGING / "tramo_vigilancia.csv",
+                                   index=False, encoding="utf-8-sig")
+    print(f"\n{'=' * 50}")
+    print("TRAMO DE VIGILANCIA (pareto 10-20) — reporte de calidad, SIN gate duro:")
+    print(df_vigilancia[cols_vig].to_string(index=False))
 
     # ── Guardar tablon con predicciones ──────────────────────────────────────
     df.to_parquet(STAGING / "tablon_unico.parquet", index=False)
