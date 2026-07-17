@@ -14,9 +14,14 @@ ARQUITECTURA (2026-06-11; reformada 2026-06-12 — sin escenarios, con re-anclaj
        p < BK_ANCLA_PDP -> 0. p_ref/delta_ref vienen de metricas.csv (03).
        Garantia: en Brent=BRENT_REF (ultimo quarter conocido) Vol = baseline exacto.
 
-  ES_VIABLE        = precio_aceite >= BREAKEVEN_OPERACIONAL (piso inferior/abandono).
-  ES_FULL_RESERVAS = precio_aceite >= BREAKEVEN_FINANCIERO  (piso superior).
+  ES_VIABLE        = precio_aceite >= piso EFECTIVO (PRECIO_EQUILIBRIO/abandono capado
+                     bajo p_ref cuando >= p_ref con baseline > 0; auditoria 2026-07-07 H1).
+  ES_FULL_RESERVAS = precio_aceite >= BREAKEVEN  (piso superior; mantener reservas).
+  ALERTA_BK        = BK_SUPERA_PRECIO_REF (BK falsificado por la certificacion,
+                     piso capado) | SIN_REANCLAJE (campo sin p_ref, curva sin shift).
   ES_EXTRAPOLADO   = Brent fuera de la banda observada del Consolidado por campo ± margen.
+  ES_CLIPPED       = Brent por ENCIMA del techo de la banda del deck: la isotonica esta
+                     saturada (out_of_bounds='clip') y el volumen es techo de recuperacion.
   M2_ES_FALLBACK   = el campo no tiene relacion Aceite~Brent propia (k de portafolio).
 
 TRES MATRICES (aislar el origen de errores, directriz 2026-06-12):
@@ -36,12 +41,14 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from motores_modelo1 import volumen_anclado
+from motores_modelo1 import piso_efectivo, volumen_anclado
+from track import sufijo_track, flag
 
+_SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR    = Path(__file__).parent
-STAGING     = BASE_DIR / "datos" / "staging"
+STAGING     = BASE_DIR / "datos" / f"staging{_SUF}"
 MODELOS_DIR = STAGING / "modelos"
-RESULTADOS  = BASE_DIR / "resultados"
+RESULTADOS  = BASE_DIR / f"resultados{_SUF}"
 RESULTADOS.mkdir(parents=True, exist_ok=True)
 
 # Modelo 2: predictor Brent -> Neto (import dinamico: el nombre empieza por digito)
@@ -94,10 +101,20 @@ CONFOUND_SALTO_REL_MIN  = 0.05
 # otras etiquetas): el salto espurio escala con el baseline y ya es relevante
 # para CAPEX en campos medianos (LA CIRA 44, CUSIANA 32, YARIGUI 32).
 CONFOUND_BASELINE_MATERIAL = 20.0
+# Sesgo de recuperacion de vigencia (2026-07-10, artifact 8a8f2cbc): la isotonica
+# lee el DECLINO de reservas 2024->2026 como elasticidad de precio. El sintoma es
+# un |d_ref|/baseline grande: el ancla p_ref cae en el fondo del valle de la ultima
+# vigencia y la curva "recupera" el nivel de 2024 al subir el Brent (Casabe +40%,
+# Guando +56%). A diferencia de los otros caps, este NO se condiciona a materialidad:
+# el problema es mas visible justamente en maduros pequeños (Casabe 14, Caño Limon
+# 12 MBPE) que hoy salen ALTA con +40%. Cap a MEDIA con motivo 'sesgo-recuperacion'.
+CONFIANZA_SESGO_RECUP_MAX = 0.15
 
 HISTORICO_DIR = RESULTADOS / "historico_predicciones"
 
-# Motores 1D: PRIMARIO (Isotonica) y VALIDACION (Suave). Sufijo de archivo joblib y label.
+# Motores 1D: PRIMARIO (Isotonica/hibrido) y VALIDACION (Suave u otro 2.o LOYO s12).
+# Sufijo de archivo joblib y label PBI (legado: "Isotonica"/"Suave" — los nombres
+# reales del motor van en METODO_REAL si hay metricas).
 MOTORES = [("Isotonica", "iso"), ("Suave", "suave")]
 
 # Grilla de Precio Aceite para la matriz M1 pura (independiente del Brent)
@@ -131,23 +148,30 @@ def derivar_vigencias(df: pd.DataFrame) -> tuple[str, str]:
 
 
 def construir_puntos_reales(df, filas_m1, filas_m2, baselines, anclaje):
-    """Une curvas del modelo + puntos reales + ancla para replicar en Power BI los
-    dos plots de datos/staging (espacio delta y volumen absoluto) y el plot M2.
+    """Une curvas del modelo + puntos reales + baseline + ancla para replicar en
+    Power BI los dos plots de datos/staging (espacio delta y volumen absoluto) y
+    el plot M2.
 
-    Reales coloreados por AÑO (serie 'Real {año}' → una serie/color por vigencia).
-    No incluye sinteticos ni breakeven: solo modelo + reales + ancla actual.
-    - M1: reales = CONSOLIDADO (~ES_SINTETICO & ~ES_BASELINE & DELTA_SENS notna).
-          Volumen real graficado = baseline_latest + DELTA_SENS (mismo criterio que el
-          panel derecho de 03_modelo: delta anclado al baseline vigente).
+    `SERIE` lleva el detalle (incluye el Q de la Sensibilidad, ej. 'Sensibilidad
+    2024-Q3'); `SERIE_COLOR` agrupa por año para que el color/legend del tablero
+    no explote en un color por trimestre (directriz usuario 2026-07-16: Q en la
+    etiqueta, color agrupado por vigencia/año).
+    No incluye sinteticos ni breakeven: solo modelo + sensibilidad + baseline + ancla.
+    - M1: sensibilidad = CONSOLIDADO (~ES_SINTETICO & ~ES_BASELINE & DELTA_SENS notna,
+          por VIGENCIA/Q). Volumen graficado = baseline_latest + DELTA_SENS (mismo
+          criterio que el panel derecho de 03_modelo: delta anclado al baseline vigente).
+          Baseline = cierres oficiales anuales (ES_BASELINE), mismos puntos que M2.
     - M2: reales = HIST cierres anuales (ES_BASELINE & BRENT_FLAT/PRECIO_NETO notna),
           mismos puntos con que se ajusta la recta Theil-Sen (03b).
     """
-    # ── M1: curva iso/suave + reales por año + ancla ─────────────────────────
+    # ── M1: curva iso/suave + sensibilidad por Q + baseline anual + ancla ────
     reg_m1 = []
     for r in filas_m1:
+        serie = "Isotónica" if r["MOTOR"] == "Isotonica" else "Suave"
         reg_m1.append({
             "CAMPO": r["CAMPO"],
-            "SERIE": "Isotónica" if r["MOTOR"] == "Isotonica" else "Suave",
+            "SERIE": serie,
+            "SERIE_COLOR": serie,
             "AÑO": None,
             "PRECIO_NETO_USD_BBL": r["PRECIO_ACEITE_USD_BBL"],
             "DELTA_MBPE": r["DELTA_ANCLADO_MBPE"],
@@ -159,20 +183,41 @@ def construir_puntos_reales(df, filas_m1, filas_m2, baselines, anclaje):
         base = baselines.get(r["CAMPO"], np.nan)
         if pd.isna(base):
             continue
+        anio = int(r["AÑO"])
+        vig_q = str(r["VIGENCIA"]).replace("_Q", "-Q")
         reg_m1.append({
             "CAMPO": r["CAMPO"],
-            "SERIE": f"Real {int(r['AÑO'])}",
-            "AÑO": int(r["AÑO"]),
+            "SERIE": f"Sensibilidad {vig_q}",
+            "SERIE_COLOR": f"Sensibilidad {anio}",
+            "AÑO": anio,
             "PRECIO_NETO_USD_BBL": round(float(r["PRECIO_NETO_USD_BBL"]), 2),
             "DELTA_MBPE": round(float(r["DELTA_SENS_MBPE"]), 2),
             "VOLUMEN_MBPE": round(float(base + r["DELTA_SENS_MBPE"]), 2),
+        })
+    # Baseline: cierres oficiales anuales (mismos puntos que alimentan M2 Theil-Sen,
+    # ver bloque `hist` abajo) — el usuario quiere verlos también en el espacio M1.
+    hist_baseline = df[(~df["ES_SINTETICO"]) & df["ES_BASELINE"]
+                       & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()
+                       & df["PRECIO_NETO_USD_BBL"].notna()]
+    for _, r in hist_baseline.iterrows():
+        base = baselines.get(r["CAMPO"], np.nan)
+        anio = int(r["AÑO"])
+        vol_of = float(r["VOLUMEN_1P_OFICIAL_MBPE"])
+        reg_m1.append({
+            "CAMPO": r["CAMPO"],
+            "SERIE": f"Baseline {anio}",
+            "SERIE_COLOR": f"Baseline {anio}",
+            "AÑO": anio,
+            "PRECIO_NETO_USD_BBL": round(float(r["PRECIO_NETO_USD_BBL"]), 2),
+            "DELTA_MBPE": round(vol_of - float(base), 2) if pd.notna(base) else None,
+            "VOLUMEN_MBPE": round(vol_of, 2),
         })
     for campo, base in baselines.items():
         p_ref = anclaje.get(campo, {}).get("P_REF_USD_BBL", np.nan)
         if pd.isna(p_ref) or pd.isna(base):
             continue
         reg_m1.append({
-            "CAMPO": campo, "SERIE": "Ancla", "AÑO": None,
+            "CAMPO": campo, "SERIE": "Ancla", "SERIE_COLOR": "Ancla", "AÑO": None,
             "PRECIO_NETO_USD_BBL": round(float(p_ref), 2),
             "DELTA_MBPE": 0.0, "VOLUMEN_MBPE": round(float(base), 2),
         })
@@ -301,15 +346,15 @@ def cargar_anclas(df: pd.DataFrame) -> dict:
 
 def cargar_ponderados(df: pd.DataFrame) -> dict:
     """Breakevens PONDERADOS 1P globales (D6, referencia de reporte) por campo."""
-    sub = df.dropna(subset=["BREAKEVEN_FINANCIERO_USD_BBL",
-                            "BREAKEVEN_OPERACIONAL_USD_BBL"], how="all")
+    sub = df.dropna(subset=["BREAKEVEN_USD_BBL",
+                            "PRECIO_EQUILIBRIO_USD_BBL"], how="all")
     out = {}
     for campo, g in sub.groupby("CAMPO"):
         fila = g.sort_values("VIGENCIA_BREAKEVEN", ascending=False).iloc[0]
-        fin = float(fila["BREAKEVEN_FINANCIERO_USD_BBL"]) \
-            if pd.notna(fila["BREAKEVEN_FINANCIERO_USD_BBL"]) else np.nan
-        ope = float(fila["BREAKEVEN_OPERACIONAL_USD_BBL"]) \
-            if pd.notna(fila["BREAKEVEN_OPERACIONAL_USD_BBL"]) else np.nan
+        fin = float(fila["BREAKEVEN_USD_BBL"]) \
+            if pd.notna(fila["BREAKEVEN_USD_BBL"]) else np.nan
+        ope = float(fila["PRECIO_EQUILIBRIO_USD_BBL"]) \
+            if pd.notna(fila["PRECIO_EQUILIBRIO_USD_BBL"]) else np.nan
         out[campo] = (fin, ope)
     return out
 
@@ -319,6 +364,35 @@ def cargar_baselines(df: pd.DataFrame) -> dict:
     df_b = df[(df["ESCENARIO"] == "BASE") & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
     return (df_b.sort_values("AÑO")
             .groupby("CAMPO")["VOLUMEN_1P_OFICIAL_MBPE"].last().to_dict())
+
+
+def cargar_anio_baseline(df: pd.DataFrame) -> dict:
+    """Año del cierre oficial (carry-forward A-1) usado como VOLUMEN_1P_BASELINE_MBPE.
+
+    Para trazabilidad: el Baseline per-campo NO es necesariamente el cierre 2025
+    (campos sin reporte 2025 cargan el ultimo cierre conocido, ej. 2021) — distinto
+    del Cierre 2025 (cargar_cierre_2025), que es el numero de comparacion 2026."""
+    df_b = df[(df["ESCENARIO"] == "BASE") & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
+    return (df_b.sort_values("AÑO")
+            .groupby("CAMPO")["AÑO"].last().to_dict())
+
+
+def cargar_cierre_2025(anio_cierre: int) -> dict:
+    """1P certificado ECP S.A. (sin filiales) del cierre `anio_cierre`, por campo
+    UNIFICADO — el numero de comparacion 2026 (~1685 MBPE para 2025).
+
+    Reusa la homologacion de reconciliacion_baseline.py (misma agregacion v3: suma
+    de componentes fisicos que coexisten bajo el mismo UNIFICADO) en vez de
+    hardcodear el total: solo suma campos que SI certificaron ese cierre — un campo
+    sin reporte ese año no debe aportar al numero contra el que se compara la
+    predicción (directriz usuario 2026-07-16)."""
+    from homologacion import Homologador
+    from reconciliacion_baseline import cargar_hist_homologado, clasificar_scope
+    hist = cargar_hist_homologado(anio_cierre)
+    hom = Homologador()
+    hist["SCOPE"] = hist["UNIFICADO"].apply(lambda u: clasificar_scope(u, hom))
+    ok = hist[(hist["HOMOLOG_FLAG"] == "OK") & (hist["SCOPE"] == "PORTAFOLIO")]
+    return ok.groupby("UNIFICADO")["1P"].sum().to_dict()
 
 
 def banda_historica_brent(df: pd.DataFrame) -> dict:
@@ -334,10 +408,19 @@ def banda_historica_brent(df: pd.DataFrame) -> dict:
 def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
                          mae_abs=999.0, outlier_lloo=False,
                          skill=np.nan, mae_naive=np.nan,
-                         m2_fragil=False, sens_no_ident=False) -> tuple[str, str]:
+                         m2_fragil=False, sens_no_ident=False,
+                         alerta_bk="", sesgo_recup=np.nan,
+                         metrica_base="LOO", skill_alt=np.nan) -> tuple[str, str]:
     """Clasifica la confianza usando criterios funcionales del piloto (MAESTRO §7.4).
 
-    Gate de skill (2026-06-11): ALTA exige SKILL_ISO > 0 o campo "plano"
+    Métrica de gate (2026-07-10, contrato NORTE): cuando el campo tiene ≥2 vigencias de
+    Consolidado se usan las métricas LOYO (leave-one-YEAR-out) — la pregunta honesta del
+    negocio "¿puedes predecir el año que no viste?" = predecir el siguiente quarter. El
+    LOO clásico deja 1 punto fuera y lo predicen los otros del MISMO año (delta plano
+    intra-vigencia) → subestima el error de generalización 4-9x. `metrica_base` documenta
+    cuál se usó; `skill_alt` es el skill de la otra métrica (para el motivo). Ver §3ter.
+
+    Gate de skill (2026-06-11): ALTA exige SKILL > 0 o campo "plano"
     (MAE_NAIVE pequeño — la media ingenua es imbatible por construccion alli).
     SKILL NaN (sin reales suficientes o naive≈0) no penaliza.
 
@@ -363,10 +446,25 @@ def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
     # despreciable para CAPEX → no degrada, solo queda en el motivo (auditable).
     outlier_material = outlier_lloo and mae_rel >= CONFIANZA_MAE_REL_OUTLIER
 
-    partes = [f"N={n_real}", f"MAE_rel={mae_rel:.2f}", f"MAE_abs={mae_abs:.2f}MBPE",
-              f"div={divergencia:.2f}", f"base={baseline:.1f}MBPE"]
+    # Divergencia NaN = no computable (sin pivote en banda): no bloquea ni degrada,
+    # solo queda visible en el motivo (auditoria 2026-07-07 H3; antes 999 -> BAJA).
+    div_na = pd.isna(divergencia)
+    div_ok_alta  = div_na or divergencia < CONFIANZA_DIV_ALTA
+    div_ok_media = div_na or divergencia < CONFIANZA_DIV_MEDIA
+
+    partes = [f"metrica={metrica_base}",
+              f"N={n_real}", f"MAE_rel={mae_rel:.2f}", f"MAE_abs={mae_abs:.2f}MBPE",
+              "div=NA" if div_na else f"div={divergencia:.2f}",
+              f"base={baseline:.1f}MBPE"]
+    if div_na:
+        partes.insert(0, "divergencia-no-computable")
+    if alerta_bk:
+        # BK_SUPERA_PRECIO_REF / SIN_REANCLAJE en formato motivo (minusculas-guion)
+        partes.insert(0, alerta_bk.lower().replace("_", "-"))
     if pd.notna(skill):
         partes.append(f"skill={skill:.2f}")
+    if pd.notna(skill_alt):
+        partes.append(f"skill_{'loo' if metrica_base=='LOYO' else 'loyo'}={skill_alt:.2f}")
     if outlier_lloo:
         partes.append("OUTLIER_LOO" if outlier_material else "OUTLIER_LOO_INMATERIAL")
     # Separador " | " (no ";"): Excel es-CO interpreta ";" como delimitador de
@@ -374,11 +472,14 @@ def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
     motivo = " | ".join(partes)
 
     if n_real == 0:
-        return "SOLO_SINTETICO", f"sin datos reales | {motivo}"
+        # INSENSIBLE_PRECIO (antes SOLO_GAS/SOLO_SINTETICO, renombre 2026-07-15): campo
+        # sin deck real — típicamente gas/GLP insensible al precio. La predicción es
+        # plana = último cierre (sin curva sintética en el export; directriz §4).
+        return "INSENSIBLE_PRECIO", f"sin deck real (gas/insensible) | {motivo}"
     if baseline < CONFIANZA_BASELINE_MIN:
         return "BAJA", f"micro-campo | {motivo}"
     if outlier_material:
-        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
+        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and div_ok_media):
             return "MEDIA", motivo
         return "BAJA", motivo
 
@@ -402,7 +503,7 @@ def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
     # PENDIENTE de la curva no es confiable — que es justo lo que lee CAPEX.
     if sens_no_ident and baseline >= CONFOUND_BASELINE_MATERIAL:
         motivo = f"sensibilidad-no-identificada | {motivo}"
-        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
+        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and div_ok_media):
             return "MEDIA", motivo
         return "BAJA", motivo
 
@@ -411,14 +512,26 @@ def clasificar_confianza(n_real, mae_rel, divergencia, baseline,
     # aunque M1 luzca preciso (informe 2026-07-01 WS2.3).
     if m2_fragil and baseline >= CONFIANZA_BASELINE_MATERIAL:
         motivo = f"M2-fragil | {motivo}"
-        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
+        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and div_ok_media):
+            return "MEDIA", motivo
+        return "BAJA", motivo
+
+    # Sesgo de recuperacion de vigencia (artifact 8a8f2cbc, 2026-07-10): un
+    # |d_ref|/baseline grande delata que el ancla p_ref cae en el valle de la ultima
+    # vigencia y la curva "recupera" el nivel de un deck anterior al subir el Brent
+    # (declino leido como elasticidad). NO se condiciona a materialidad: el problema
+    # es mas visible en maduros pequeños (Casabe/Caño Limon) que hoy salen ALTA con
+    # +40%. Techo MEDIA (BAJA si ademas el error LOO es alto).
+    if pd.notna(sesgo_recup) and sesgo_recup > CONFIANZA_SESGO_RECUP_MAX:
+        motivo = f"sesgo-recuperacion={sesgo_recup:.0%} | {motivo}"
+        if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and div_ok_media):
             return "MEDIA", motivo
         return "BAJA", motivo
 
     if (n_real >= CONFIANZA_N_REAL_MIN and mae_rel_eff < CONFIANZA_MAE_REL_ALTA
-            and divergencia < CONFIANZA_DIV_ALTA and not sin_skill):
+            and div_ok_alta and not sin_skill):
         return "ALTA", motivo
-    if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and divergencia < CONFIANZA_DIV_MEDIA):
+    if (mae_rel_eff < CONFIANZA_MAE_REL_MEDIA and div_ok_media):
         if sin_skill:
             return "MEDIA", f"sin skill vs ingenuo | {motivo}"
         return "MEDIA", motivo
@@ -511,6 +624,82 @@ def actualizar_changelog(q_objetivo, fecha, n_campos, comp) -> None:
     print(f"  Changelog actualizado: {ruta}")
 
 
+def emitir_cobertura_plana(df, campos_exportados, brent_range,
+                           q_objetivo, vigencia_base, fecha_prediccion,
+                           brent_ref, cierre_2025=None, anio_baseline_map=None) -> list:
+    """
+    Filas planas para el mapeo del portafolio COMPLETO (directriz §4 + requisito de
+    cobertura 2026-07-10): todo campo con cierre oficial que NO tiene modelo (ni deck ni
+    breakeven) entra como línea plana = último cierre, para que al seleccionar "todos los
+    campos / todas las confiabilidades" el tablero muestre el portafolio entero.
+
+    Excluye FILIAL (política: filiales nunca entran al análisis) y los campos ya
+    exportados. Nivel de confianza = SIN_MODELO (asignado en el flujo principal).
+    """
+    from homologacion import Homologador
+    h = Homologador()
+    cierre_2025 = cierre_2025 or {}
+    anio_baseline_map = anio_baseline_map or {}
+
+    # Último cierre oficial por campo (serie BASE)
+    base = df[(df["ESCENARIO"] == "BASE") & df["VOLUMEN_1P_OFICIAL_MBPE"].notna()]
+    cierre = (base.sort_values("AÑO").groupby("CAMPO")["VOLUMEN_1P_OFICIAL_MBPE"]
+              .last().to_dict())
+
+    filas_cov = []
+    n_campos = 0
+    for campo, vol_cierre in cierre.items():
+        if campo in campos_exportados:
+            continue
+        gerencia = str(h.atributos(campo).get("NEW GERENCIA", "")).strip().upper()
+        if gerencia == "FILIAL":
+            continue
+        # Directriz usuario 2026-07-16: si el campo SÍ certificó cierre 2025 (incluso
+        # si fue 0), ese es el valor vigente — no el último cierre positivo de años
+        # anteriores (2017-2021). Sin esto, campos ya agotados seguían mostrando un
+        # "1P" fantasma heredado de su última certificación con volumen.
+        cierre_2025_campo = cierre_2025.get(campo)
+        if cierre_2025_campo is not None and pd.notna(cierre_2025_campo):
+            vol_cierre = cierre_2025_campo
+            anio_base_campo = 2025
+        else:
+            anio_base_campo = anio_baseline_map.get(campo)
+        if not (pd.notna(vol_cierre) and float(vol_cierre) > 0):
+            continue
+        n_campos += 1
+        for label in ("Isotonica", "Suave"):
+            for brent in brent_range:
+                filas_cov.append({
+                    "CAMPO":                        campo,
+                    "MOTOR":                        label,
+                    "BRENT_USD_BBL":                float(brent),
+                    "PRECIO_NETO_EFECTIVO_USD_BBL": None,   # sin M2
+                    "DELTA_PRED_MBPE":              0.0,
+                    "VOLUMEN_1P_BASELINE_MBPE":     round(float(vol_cierre), 2),
+                    "AÑO_BASELINE":                 int(anio_base_campo)
+                                                    if pd.notna(anio_base_campo) else None,
+                    "CIERRE_2025_MBPE":             round(float(cierre_2025_campo), 2)
+                                                    if cierre_2025_campo is not None
+                                                    and pd.notna(cierre_2025_campo) else None,
+                    "VOLUMEN_1P_PREDICHO_MBPE":     round(float(vol_cierre), 2),
+                    "DELTA_VS_BASE_MBPE":           0.0,
+                    "DELTA_VS_BASE_PCT":            0.0,
+                    "BRENT_REF_USD_BBL":            round(brent_ref, 2) if pd.notna(brent_ref) else None,
+                    "ES_VIABLE":                    True,
+                    "ES_FULL_RESERVAS":             True,
+                    "ES_EXTRAPOLADO":               False,
+                    "ES_CLIPPED":                   False,
+                    "TIPO_MODELO":                  "SIN_MODELO",
+                    "TIPO_DATO":                    "SIN_MODELO",
+                    "Q_OBJETIVO":                   q_objetivo,
+                    "VIGENCIA_BASE":                vigencia_base,
+                    "FECHA_PREDICCION":             fecha_prediccion,
+                })
+    print(f"\n  [Cobertura] {n_campos} campos sin modelo (cierre 2025, no-filial) "
+          f"agregados como línea plana SIN_MODELO")
+    return filas_cov
+
+
 if __name__ == "__main__":
     print("=== 04_pbi_export.py — Meshgrid Brent->Neto->Delta (Modelo 2 + Modelo 1) ===\n")
 
@@ -534,6 +723,24 @@ if __name__ == "__main__":
     anclaje = _met_full.set_index("CAMPO")[
         ["BRENT_REF_USD_BBL", "P_REF_USD_BBL", "DELTA_REF_ISO", "DELTA_REF_SUAVE"]
     ].to_dict("index")
+    # Deck plano (directriz §4): campos insensibles al precio -> curva plana (sin rampa
+    # isotonica interpolada en la franja sin datos). Detectado en 03_modelo.
+    deck_plano_map = (_met_full.set_index("CAMPO")["DECK_PLANO"].fillna(False).astype(bool).to_dict()
+                      if "DECK_PLANO" in _met_full.columns else {})
+    n_real_map = (_met_full.set_index("CAMPO")["N_REAL_DELTA"].fillna(0).astype(int).to_dict()
+                  if "N_REAL_DELTA" in _met_full.columns else {})
+    # s12: nombres reales del par primario/validacion (2.o LOYO dinamico)
+    metodo_prim_map = (_met_full.set_index("CAMPO")["METODO_PRIMARIO"].to_dict()
+                       if "METODO_PRIMARIO" in _met_full.columns else {})
+    metodo_valid_map = (_met_full.set_index("CAMPO")["METODO_VALIDACION"].to_dict()
+                        if "METODO_VALIDACION" in _met_full.columns else {})
+    # Bandas de incertidumbre LOYO (track Calidad, s9): presentes solo si 03 corrio con
+    # PRED_BANDAS_LOYO. Guard por PRESENCIA de columnas (mismo patron que BK_P*): en
+    # Produccion no existen y el export queda identico.
+    resid_p10 = (_met_full.set_index("CAMPO")["LOYO_RESID_P10"].to_dict()
+                 if "LOYO_RESID_P10" in _met_full.columns else {})
+    resid_p90 = (_met_full.set_index("CAMPO")["LOYO_RESID_P90"].to_dict()
+                 if "LOYO_RESID_P90" in _met_full.columns else {})
     BRENT_REF = float(_met_full["BRENT_REF_USD_BBL"].dropna().iloc[0]) \
         if _met_full["BRENT_REF_USD_BBL"].notna().any() else np.nan
 
@@ -543,6 +750,18 @@ if __name__ == "__main__":
     print(f"  PREDICCION para {q_objetivo}  (datos base: {vigencia_base}, "
           f"generada: {fecha_prediccion})")
     print(f"{'='*55}\n")
+
+    # Cierre de comparación 2026 (directriz usuario 2026-07-16): 1P certificado
+    # ECP S.A. (sin filiales) del año A-1 respecto a vigencia_base — DISTINTO del
+    # Baseline per-campo (carry-forward, puede venir de años anteriores a A-1 en
+    # campos sin reporte reciente). anio_baseline_map documenta ese carry-forward.
+    anio_baseline_map = cargar_anio_baseline(df)
+    anio_cierre_2025 = (int(vigencia_base.split("_")[0]) - 1
+                        if vigencia_base != "DESCONOCIDA" else 2025)
+    cierre_2025 = cargar_cierre_2025(anio_cierre_2025)
+    print(f"  Cierre {anio_cierre_2025} certificado ECP S.A. (sin filiales, "
+          f"base de comparación 2026): {sum(cierre_2025.values()):,.1f} MBPE "
+          f"({len(cierre_2025)} campos con cierre {anio_cierre_2025})\n")
 
     # Meshgrid dinamico: banda Consolidado real ± MARGEN_BRENT_USD
     df_cons_real = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"]) & df["BRENT_FLAT_USD_BBL"].notna()]
@@ -572,6 +791,7 @@ if __name__ == "__main__":
     filas    = []   # cadena completa Brent -> Aceite -> Volumen
     filas_m1 = []   # Modelo 1 puro (grilla en Precio Aceite)
     filas_m2 = []   # Modelo 2 puro (grilla en Brent)
+    alertas_bk = {} # CAMPO -> ALERTA_BK (H1/H3) para el motivo de confianza
     for campo in campos:
         modelos = {}
         for label, suf in MOTORES:
@@ -589,6 +809,8 @@ if __name__ == "__main__":
         bk_fin, bk_pdp = anclas.get(campo, (np.nan, np.nan))
         bk_ref_fin, bk_ref_ope = ponderados.get(campo, (np.nan, np.nan))
         baseline = baselines.get(campo, np.nan)
+        anio_baseline_campo = anio_baseline_map.get(campo)
+        cierre_2025_campo = cierre_2025.get(campo)
         bk_min_hist, bk_max_hist = bandas.get(campo, (40.0, 80.0))
         anc = anclaje.get(campo, {})
         p_ref = anc.get("P_REF_USD_BBL", np.nan)
@@ -600,6 +822,43 @@ if __name__ == "__main__":
         conf_campo = confound.get(campo, {})
         sens_no_ident = bool(conf_campo.get("FLAG", False))
         _bk_dura = bk_pdp if pd.notna(bk_pdp) else None
+        _p_ref_f = float(p_ref) if pd.notna(p_ref) else None
+
+        # Auditoria 2026-07-07 (H1/H3): coherencia BK vs certificacion y re-anclaje.
+        # BK_SUPERA_PRECIO_REF: el BK de abandono queda >= p_ref con baseline > 0 —
+        #   la certificacion vigente falsifica ese BK; volumen_anclado capa el piso
+        #   (piso_efectivo) para que Vol(p_ref)=baseline en vez de un 0 espurio.
+        # SIN_REANCLAJE: campo sin p_ref en metricas — la curva sale SIN shift.
+        alerta_bk = ""
+        if _p_ref_f is None:
+            print(f"  [WARN] {campo}: sin p_ref — re-anclaje DESACTIVADO (delta_ref=0)")
+            alerta_bk = "SIN_REANCLAJE"
+        elif (_bk_dura is not None and pd.notna(baseline) and baseline > 0
+              and _bk_dura >= _p_ref_f):
+            alerta_bk = "BK_SUPERA_PRECIO_REF"
+        _bk_eff = piso_efectivo(_bk_dura, _p_ref_f,
+                                float(baseline) if pd.notna(baseline) else np.nan)
+        alertas_bk[campo] = alerta_bk
+
+        # Deck plano (directriz §4): curva = baseline sobre el piso efectivo, 0 debajo.
+        # Reemplaza la rampa isotonica interpolada en la franja sin datos por el
+        # comportamiento honesto "plano hasta el abandono". Re-anclaje trivialmente
+        # satisfecho (Vol(p_ref)=baseline). TIPO_MODELO documenta la sustitucion.
+        # INSENSIBLE_PRECIO (n_real=0): campo sin deck real → también curva plana = último cierre.
+        n_real0 = (n_real_map.get(campo, 0) == 0)
+        es_plano = (bool(deck_plano_map.get(campo, False)) or n_real0) and pd.notna(baseline)
+        tipo_modelo = ("INSENSIBLE_PRECIO" if n_real0 else
+                       "PLANO_DECK" if bool(deck_plano_map.get(campo, False)) else "ISOTONICA")
+        _piso_plano = _bk_eff if _bk_eff is not None else -np.inf
+
+        def _vol_curva(modelo, neto, d_ref):
+            """Volumen 1P reconstruido: plano (deck insensible) o anclado (isotonica)."""
+            if not pd.notna(baseline):
+                return np.full(len(neto), np.nan)
+            if es_plano:
+                return np.where(np.asarray(neto, dtype=float) >= _piso_plano,
+                                float(baseline), 0.0)
+            return volumen_anclado(modelo, neto, baseline, d_ref, _bk_dura, p_ref=_p_ref_f)
 
         # ── Matriz M2 pura: Brent -> Precio Aceite ────────────────────────────
         aceite_grid = m2.neto_desde_brent(coef, brent_range)
@@ -621,41 +880,74 @@ if __name__ == "__main__":
             })
 
         # ── Matriz M1 pura: Precio Aceite -> Delta anclado / Volumen ─────────
+        _q10m1, _q90m1 = resid_p10.get(campo), resid_p90.get(campo)
         for label, modelo in modelos.items():
             d_ref = float(delta_refs[label])
-            delta_anc = modelo.predict(pneto_grid) - d_ref
-            vol_anc = volumen_anclado(modelo, pneto_grid, baseline, d_ref, _bk_dura) \
-                if pd.notna(baseline) else np.full(len(pneto_grid), np.nan)
+            vol_anc = _vol_curva(modelo, pneto_grid, d_ref)
+            # Delta plano = vol−baseline (0 sobre el piso, −baseline debajo); isotonica
+            # usa el modelo crudo re-anclado.
+            delta_anc = (vol_anc - float(baseline)) if es_plano \
+                else (modelo.predict(pneto_grid) - d_ref)
             for i, pn in enumerate(pneto_grid):
+                vp = float(vol_anc[i]) if pd.notna(vol_anc[i]) else np.nan
+                # Banda LOYO en espacio Precio Neto (mismo criterio que la matriz de
+                # prediccion en espacio Brent, lineas ~925-933): solo motor primario,
+                # clamp P10<=vol<=P90 sin negativos, colapsa a 0 bajo el piso.
+                if (label == "Isotonica" and _q10m1 is not None and pd.notna(_q10m1)
+                        and pd.notna(vp) and vp > 0):
+                    vol_p10_m1 = round(max(0.0, min(vp, vp + float(_q10m1))), 2)
+                    vol_p90_m1 = round(max(vp, vp + float(_q90m1)), 2)
+                else:
+                    vol_p10_m1 = vol_p90_m1 = None
                 filas_m1.append({
                     "CAMPO":                       campo,
                     "MOTOR":                       label,
                     "PRECIO_ACEITE_USD_BBL":       float(pn),
-                    "DELTA_ANCLADO_MBPE":          round(float(delta_anc[i]), 2),
-                    "VOLUMEN_1P_PREDICHO_MBPE":    round(float(vol_anc[i]), 2)
-                                                   if pd.notna(vol_anc[i]) else None,
+                    "DELTA_ANCLADO_MBPE":          round(float(delta_anc[i]), 2)
+                                                   if pd.notna(delta_anc[i]) else None,
+                    "VOLUMEN_1P_PREDICHO_MBPE":    round(vp, 2) if pd.notna(vp) else None,
+                    "VOL_P10_MBPE":                vol_p10_m1,
+                    "VOL_P90_MBPE":                vol_p90_m1,
                     "VOLUMEN_1P_BASELINE_MBPE":    round(float(baseline), 2)
                                                    if pd.notna(baseline) else None,
                     "P_REF_USD_BBL":               round(float(p_ref), 2)
                                                    if pd.notna(p_ref) else None,
-                    "BREAKEVEN_FINANCIERO_USD_BBL":  round(bk_fin, 2) if pd.notna(bk_fin) else None,
-                    "BREAKEVEN_OPERACIONAL_USD_BBL": round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
+                    "TIPO_MODELO":                 tipo_modelo,
+                    "METODO_PRIMARIO":             metodo_prim_map.get(campo, "Isotonica"),
+                    "METODO_VALIDACION":           metodo_valid_map.get(campo, "Suave"),
+                    # METODO_REAL: nombre real del motor de esta fila (joblib iso/suave)
+                    "METODO_REAL":                 (metodo_prim_map.get(campo, "Isotonica")
+                                                   if label == "Isotonica"
+                                                   else metodo_valid_map.get(campo, "Suave")),
+                    "BREAKEVEN_USD_BBL":  round(bk_fin, 2) if pd.notna(bk_fin) else None,
+                    "PRECIO_EQUILIBRIO_USD_BBL": round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
                 })
 
         # ── Cadena completa: Brent -> Aceite -> Volumen anclado ──────────────
         for label, modelo in modelos.items():
             d_ref = float(delta_refs[label])
-            delta_anc = modelo.predict(aceite_grid) - d_ref
-            vol = volumen_anclado(modelo, aceite_grid, baseline, d_ref, _bk_dura) \
-                if pd.notna(baseline) else modelo.predict(aceite_grid) - d_ref
+            # Sin baseline no hay volumen reconstruible: NaN, no un delta disfrazado
+            # de volumen (auditoria 2026-07-07 H3). Plano: curva plana (directriz §4).
+            vol = _vol_curva(modelo, aceite_grid, d_ref)
+            delta_anc = (vol - float(baseline)) if es_plano \
+                else (modelo.predict(aceite_grid) - d_ref)
 
             for i, brent in enumerate(brent_range):
                 pn   = float(aceite_grid[i])
                 pn_r = round(pn, 2)
-                es_viable = (pn_r >= round(bk_pdp, 2)) if pd.notna(bk_pdp) else True
+                # ES_VIABLE contra el piso EFECTIVO: debe coincidir con el hard-zero
+                # que aplica volumen_anclado (H1) — si no, el tablero mostraria
+                # ES_VIABLE=False con volumen > 0
+                es_viable = (pn_r >= round(_bk_eff, 2)) if _bk_eff is not None else True
                 es_full   = (pn_r >= round(bk_fin, 2)) if pd.notna(bk_fin) else True
                 es_extrap = (float(brent) < bk_min_hist - MARGEN_EXTRAP_USD or
                              float(brent) > bk_max_hist + MARGEN_EXTRAP_USD)
+                # ES_CLIPPED (artifact 8a8f2cbc, 2026-07-10): el punto queda por ENCIMA
+                # del techo de la banda del deck -> la isotonica (out_of_bounds='clip')
+                # esta saturada y entrega el "techo de recuperacion" de una vigencia
+                # anterior. Mas estricto que ES_EXTRAPOLADO (sin margen, solo lado alto):
+                # marca justo la zona donde el volumen predicho es un artefacto del clip.
+                es_clipped = float(brent) > bk_max_hist
 
                 vol_pred = float(vol[i])
                 vol_base = float(baseline) if pd.notna(baseline) else np.nan
@@ -663,13 +955,39 @@ if __name__ == "__main__":
                 pct_vs   = round((vol_pred - vol_base) / vol_base * 100, 2) \
                     if pd.notna(baseline) and vol_base > 0 else np.nan
 
+                # Banda de incertidumbre LOYO (s9): curva + cuantiles de residuales.
+                # Clamps: P10 <= vol <= P90, sin negativos; bajo el piso (vol=0, afirmacion
+                # dura de abandono) la banda colapsa a 0 — la incertidumbre ahi es del BK,
+                # no de la curva. Solo motor primario (Isotonica); NaN sin residuales.
+                _q10, _q90 = resid_p10.get(campo), resid_p90.get(campo)
+                if (label == "Isotonica" and _q10 is not None and pd.notna(_q10)
+                        and vol_pred > 0):
+                    vol_p10 = round(max(0.0, min(vol_pred, vol_pred + float(_q10))), 2)
+                    vol_p90 = round(max(vol_pred, vol_pred + float(_q90)), 2)
+                else:
+                    vol_p10 = vol_p90 = None
+                ancho_banda = round(vol_p90 - vol_p10, 2) \
+                    if vol_p10 is not None and vol_p90 is not None else None
+                _extra_banda = ({"VOL_P10_MBPE": vol_p10, "VOL_P90_MBPE": vol_p90,
+                                 "ANCHO_BANDA_LOYO_MBPE": ancho_banda}
+                                if resid_p10 else {})
+
                 filas.append({
+                    **_extra_banda,
                     "CAMPO":                          campo,
                     "MOTOR":                          label,
                     "BRENT_USD_BBL":                  float(brent),
                     "PRECIO_NETO_EFECTIVO_USD_BBL":   round(pn, 2),
                     "DELTA_PRED_MBPE":                round(float(delta_anc[i]), 2),
                     "VOLUMEN_1P_BASELINE_MBPE":        round(vol_base, 2) if pd.notna(vol_base) else None,
+                    "AÑO_BASELINE":                    int(anio_baseline_campo)
+                                                       if pd.notna(anio_baseline_campo) else None,
+                    # Cierre 2025 ECP S.A. (sin filiales) — numero de comparacion 2026,
+                    # DISTINTO del Baseline per-campo (carry-forward A-1, arriba): un
+                    # campo sin reporte 2025 no debe sumar aqui (directriz usuario).
+                    "CIERRE_2025_MBPE":                round(float(cierre_2025_campo), 2)
+                                                       if cierre_2025_campo is not None
+                                                       and pd.notna(cierre_2025_campo) else None,
                     "VOLUMEN_1P_PREDICHO_MBPE":        round(vol_pred, 2),
                     "DELTA_VS_BASE_MBPE":              delta_vs,
                     "DELTA_VS_BASE_PCT":               pct_vs,
@@ -686,13 +1004,22 @@ if __name__ == "__main__":
                     # no es separable del cambio de año de Consolidado
                     "SENSIBILIDAD_NO_IDENTIFICADA":    sens_no_ident,
                     "CONFOUND_ETA2":                   conf_campo.get("ETA2"),
-                    "BREAKEVEN_FINANCIERO_USD_BBL":    round(bk_fin, 2) if pd.notna(bk_fin) else None,
-                    "BREAKEVEN_OPERACIONAL_USD_BBL":   round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
-                    "BK_REFERENCIA_FIN_USD_BBL":       round(bk_ref_fin, 2) if pd.notna(bk_ref_fin) else None,
-                    "BK_REFERENCIA_OPE_USD_BBL":       round(bk_ref_ope, 2) if pd.notna(bk_ref_ope) else None,
+                    "BREAKEVEN_USD_BBL":    round(bk_fin, 2) if pd.notna(bk_fin) else None,
+                    "PRECIO_EQUILIBRIO_USD_BBL":   round(bk_pdp, 2) if pd.notna(bk_pdp) else None,
+                    "BREAKEVEN_REF_USD_BBL":       round(bk_ref_fin, 2) if pd.notna(bk_ref_fin) else None,
+                    "PRECIO_EQUILIBRIO_REF_USD_BBL":       round(bk_ref_ope, 2) if pd.notna(bk_ref_ope) else None,
                     "ES_VIABLE":                       es_viable,
                     "ES_FULL_RESERVAS":                es_full,
                     "ES_EXTRAPOLADO":                  es_extrap,
+                    "ES_CLIPPED":                      es_clipped,
+                    # Auditoria 2026-07-07 H1/H3: BK_SUPERA_PRECIO_REF (piso capado,
+                    # revisar BK con finanzas) o SIN_REANCLAJE (curva sin shift)
+                    "ALERTA_BK":                       alerta_bk,
+                    # Piso duro realmente aplicado (= BK abandono, o p_ref-1 si capado)
+                    "PISO_EFECTIVO_USD_BBL":           round(_bk_eff, 2)
+                                                       if _bk_eff is not None else None,
+                    # Motor efectivo: ISOTONICA o PLANO_DECK (directriz §4)
+                    "TIPO_MODELO":                     tipo_modelo,
                     "TIPO_DATO":                       "PREDICCIÓN",
                     "Q_OBJETIVO":                      q_objetivo,
                     "VIGENCIA_BASE":                   vigencia_base,
@@ -703,9 +1030,18 @@ if __name__ == "__main__":
         if "Isotonica" in modelos and pd.notna(baseline):
             d_ref = float(delta_refs["Isotonica"])
             nb = m2.neto_desde_brent(coef, np.array([brent_min_din, brent_max_din]))
-            v = volumen_anclado(modelos["Isotonica"], nb, baseline, d_ref, _bk_dura)
+            v = volumen_anclado(modelos["Isotonica"], nb, baseline, d_ref, _bk_dura,
+                                p_ref=_p_ref_f)
             print(f"  {campo:<20} | baseline={baseline:.1f} MBPE | "
                   f"Iso@${brent_min_din}={v[0]:.0f} -> @${brent_max_din}={v[1]:.0f}")
+
+    # Cobertura total del portafolio (directriz §4): campos con cierre sin modelo
+    # entran como línea plana SIN_MODELO (filiales excluidas por política).
+    campos_exportados = {f["CAMPO"] for f in filas}
+    filas.extend(emitir_cobertura_plana(
+        df, campos_exportados, brent_range,
+        q_objetivo, vigencia_base, fecha_prediccion, BRENT_REF,
+        cierre_2025, anio_baseline_map))
 
     df_out = pd.DataFrame(filas)
 
@@ -715,50 +1051,99 @@ if __name__ == "__main__":
         for _c in ["ALERTA_LOO_OUTLIER_ISO"]:
             if _c not in _met_raw.columns:
                 _met_raw[_c] = False
-        for _c in ["SKILL_ISO", "MAE_NAIVE"]:
+        for _c in ["SKILL_ISO", "MAE_NAIVE", "MAE_LOYO_ISO", "SKILL_LOYO_ISO",
+                   "N_VIGENCIAS_LOYO", "MAE_NAIVE_LOYO"]:
             if _c not in _met_raw.columns:
                 _met_raw[_c] = np.nan
         met = _met_raw[["CAMPO", "N_REAL_DELTA", "MAE_LOO_ISO", "BASELINE_LATEST",
-                        "ALERTA_LOO_OUTLIER_ISO", "SKILL_ISO", "MAE_NAIVE"]].copy()
+                        "ALERTA_LOO_OUTLIER_ISO", "SKILL_ISO", "MAE_NAIVE",
+                        "MAE_LOYO_ISO", "SKILL_LOYO_ISO", "N_VIGENCIAS_LOYO",
+                        "MAE_NAIVE_LOYO"]].copy()
         met["MAE_REL_LOO"] = (met["MAE_LOO_ISO"] /
                               met["BASELINE_LATEST"].replace(0, np.nan)).fillna(999.0)
+        # Métrica de gate LOYO (contrato NORTE 2026-07-10): honesta cross-vigencia. Solo
+        # donde hay ≥2 años de Consolidado; si no, LOO clásico (fallback). El gate lee
+        # MAE_REL_EFF/MAE_ABS_EFF/SKILL_EFF; el LOO queda en el motivo como referencia.
+        met["MAE_REL_LOYO"] = (met["MAE_LOYO_ISO"] /
+                               met["BASELINE_LATEST"].replace(0, np.nan))
+        _usa_loyo = (met["N_VIGENCIAS_LOYO"].fillna(0) >= 2) & met["MAE_LOYO_ISO"].notna()
+        met["METRICA_BASE"]  = np.where(_usa_loyo, "LOYO", "LOO")
+        met["MAE_ABS_EFF"]   = np.where(_usa_loyo, met["MAE_LOYO_ISO"], met["MAE_LOO_ISO"])
+        met["MAE_REL_EFF"]   = np.where(_usa_loyo, met["MAE_REL_LOYO"], met["MAE_REL_LOO"])
+        met["MAE_REL_EFF"]   = met["MAE_REL_EFF"].fillna(999.0)
+        met["SKILL_EFF"]     = np.where(_usa_loyo, met["SKILL_LOYO_ISO"], met["SKILL_ISO"])
+        met["SKILL_ALT"]     = np.where(_usa_loyo, met["SKILL_ISO"], met["SKILL_LOYO_ISO"])
+        met["MAE_NAIVE_EFF"] = np.where(_usa_loyo, met["MAE_NAIVE_LOYO"], met["MAE_NAIVE"])
         met["N_REAL_DELTA"] = met["N_REAL_DELTA"].fillna(0).astype(int)
         met["ALERTA_LOO_OUTLIER_ISO"] = met["ALERTA_LOO_OUTLIER_ISO"].fillna(False).astype(bool)
 
         div_serie = calcular_divergencia_motores(df_out).rename("DIVERGENCIA_MOTORES_PCT")
         met = met.merge(div_serie, on="CAMPO", how="left")
-        met["DIVERGENCIA_MOTORES_PCT"] = met["DIVERGENCIA_MOTORES_PCT"].fillna(999.0)
+        # Divergencia NO computable (sin pivote en banda 40-80) queda NaN: antes se
+        # rellenaba con 999 y forzaba BAJA silenciosamente (auditoria 2026-07-07 H3).
+        # clasificar_confianza trata NaN como "no evaluable", no como divergente.
 
         m2_fragil_map = {campo: es_m2_fragil(coef) for campo, coef in correlacion.items()}
+
+        # Sesgo de recuperacion por campo = |d_ref ISO| / baseline (artifact 8a8f2cbc):
+        # profundidad del valle donde cae el ancla p_ref. Solo Isotonica (motor primario).
+        sesgo_recup_map = {}
+        for _campo, _bl in baselines.items():
+            if pd.notna(_bl) and _bl > 0:
+                _dref = anclaje.get(_campo, {}).get("DELTA_REF_ISO", np.nan)
+                if pd.notna(_dref):
+                    sesgo_recup_map[_campo] = abs(float(_dref)) / float(_bl)
 
         rows_conf = []
         for _, r in met.iterrows():
             nivel, motivo = clasificar_confianza(
                 n_real=int(r["N_REAL_DELTA"]),
-                mae_rel=float(r["MAE_REL_LOO"]),
+                mae_rel=float(r["MAE_REL_EFF"]),
                 divergencia=float(r["DIVERGENCIA_MOTORES_PCT"]),
                 baseline=float(r["BASELINE_LATEST"]) if pd.notna(r["BASELINE_LATEST"]) else 0.0,
-                mae_abs=float(r["MAE_LOO_ISO"]) if pd.notna(r["MAE_LOO_ISO"]) else 999.0,
+                mae_abs=float(r["MAE_ABS_EFF"]) if pd.notna(r["MAE_ABS_EFF"]) else 999.0,
                 outlier_lloo=bool(r["ALERTA_LOO_OUTLIER_ISO"]),
-                skill=float(r["SKILL_ISO"]) if pd.notna(r["SKILL_ISO"]) else np.nan,
-                mae_naive=float(r["MAE_NAIVE"]) if pd.notna(r["MAE_NAIVE"]) else np.nan,
+                skill=float(r["SKILL_EFF"]) if pd.notna(r["SKILL_EFF"]) else np.nan,
+                mae_naive=float(r["MAE_NAIVE_EFF"]) if pd.notna(r["MAE_NAIVE_EFF"]) else np.nan,
                 m2_fragil=m2_fragil_map.get(r["CAMPO"], False),
-                sens_no_ident=bool(confound.get(r["CAMPO"], {}).get("FLAG", False)))
+                sens_no_ident=bool(confound.get(r["CAMPO"], {}).get("FLAG", False)),
+                alerta_bk=alertas_bk.get(r["CAMPO"], ""),
+                sesgo_recup=sesgo_recup_map.get(r["CAMPO"], np.nan),
+                metrica_base=str(r["METRICA_BASE"]),
+                skill_alt=float(r["SKILL_ALT"]) if pd.notna(r["SKILL_ALT"]) else np.nan)
             rows_conf.append({"CAMPO": r["CAMPO"], "N_REAL_DELTA": int(r["N_REAL_DELTA"]),
                               "MAE_REL_LOO": round(float(r["MAE_REL_LOO"]), 4),
                               "DIVERGENCIA_MOTORES_PCT": round(float(r["DIVERGENCIA_MOTORES_PCT"]), 4),
                               "ALERTA_LOO_OUTLIER_ISO": bool(r["ALERTA_LOO_OUTLIER_ISO"]),
-                              "NIVEL_CONFIANZA": nivel, "MOTIVO_CONFIANZA": motivo})
+                              "NIVEL_CONFIANZA": nivel, "MOTIVO_CONFIANZA": motivo,
+                              # Confiabilidad (pagina "Confiabilidad del Modelo"): metricas
+                              # LOYO crudas + sesgo de recuperacion, hoy solo visibles en el
+                              # motivo como texto — aqui van como columnas propias.
+                              "MAE_LOYO_MBPE": round(float(r["MAE_LOYO_ISO"]), 3)
+                                               if pd.notna(r["MAE_LOYO_ISO"]) else None,
+                              "SKILL_LOYO": round(float(r["SKILL_LOYO_ISO"]), 3)
+                                            if pd.notna(r["SKILL_LOYO_ISO"]) else None,
+                              "N_VIGENCIAS_LOYO": int(r["N_VIGENCIAS_LOYO"])
+                                                  if pd.notna(r["N_VIGENCIAS_LOYO"]) else None,
+                              "SESGO_RECUPERACION": round(sesgo_recup_map.get(r["CAMPO"], np.nan), 4)
+                                                    if pd.notna(sesgo_recup_map.get(r["CAMPO"], np.nan)) else None})
 
         df_conf = pd.DataFrame(rows_conf)
         df_out = df_out.merge(
             df_conf[["CAMPO", "N_REAL_DELTA", "MAE_REL_LOO", "DIVERGENCIA_MOTORES_PCT",
-                     "ALERTA_LOO_OUTLIER_ISO", "NIVEL_CONFIANZA", "MOTIVO_CONFIANZA"]],
+                     "ALERTA_LOO_OUTLIER_ISO", "NIVEL_CONFIANZA", "MOTIVO_CONFIANZA",
+                     "MAE_LOYO_MBPE", "SKILL_LOYO", "N_VIGENCIAS_LOYO", "SESGO_RECUPERACION"]],
             on="CAMPO", how="left")
+
+        # Campos de cobertura (sin modelo): NIVEL=SIN_MODELO, predicción = cierre plano.
+        _cov = df_out["TIPO_DATO"] == "SIN_MODELO"
+        df_out.loc[_cov, "NIVEL_CONFIANZA"]  = "SIN_MODELO"
+        df_out.loc[_cov, "MOTIVO_CONFIANZA"] = "sin deck ni breakeven — predicción = último cierre plano"
+        df_out.loc[_cov, "N_REAL_DELTA"]     = 0
 
         conteo = df_conf.groupby("NIVEL_CONFIANZA")["CAMPO"].nunique()
         print(f"\n{'='*55}\n  Clasificacion de confianza por campo\n{'='*55}")
-        for nivel in ["ALTA", "MEDIA", "BAJA", "SOLO_SINTETICO"]:
+        for nivel in ["ALTA", "MEDIA", "BAJA", "INSENSIBLE_PRECIO", "SIN_MODELO"]:
             print(f"  {nivel:<15}: {conteo.get(nivel, 0):3d} campos")
 
         materiales = met[met["BASELINE_LATEST"].fillna(0) >= 50].merge(
@@ -790,6 +1175,50 @@ if __name__ == "__main__":
     print(f"  Puntos M1 (curva+reales+ancla): {ruta_pm1} ({len(df_pm1)} filas)")
     print(f"  Puntos M2 (recta+reales HIST):  {ruta_pm2} ({len(df_pm2)} filas)")
 
+    # ── Dimensiones para Power BI (estrella): atributos constantes por campo ──
+    # Las matrices repiten ~35 columnas constantes en cada fila de Brent; el
+    # modelo semantico las descarta al cargar y consulta esta dim (1 fila/campo).
+    _cols_dim = ["CAMPO", "TIPO_MODELO", "VOLUMEN_1P_BASELINE_MBPE", "AÑO_BASELINE",
+                 "CIERRE_2025_MBPE", "P_REF_USD_BBL", "PISO_EFECTIVO_USD_BBL",
+                 "BREAKEVEN_USD_BBL", "PRECIO_EQUILIBRIO_USD_BBL",
+                 "BREAKEVEN_REF_USD_BBL", "PRECIO_EQUILIBRIO_REF_USD_BBL",
+                 "M2_METODO", "M2_ES_FALLBACK", "M2_N_PUNTOS", "M2_R2_LOO",
+                 "M2_FRAGIL", "SENSIBILIDAD_NO_IDENTIFICADA", "CONFOUND_ETA2",
+                 "ALERTA_BK", "NIVEL_CONFIANZA", "MOTIVO_CONFIANZA", "N_REAL_DELTA",
+                 "MAE_REL_LOO", "DIVERGENCIA_MOTORES_PCT", "ALERTA_LOO_OUTLIER_ISO",
+                 "MAE_LOYO_MBPE", "SKILL_LOYO", "N_VIGENCIAS_LOYO",
+                 "SESGO_RECUPERACION"]
+    df_dim = (df_out[[c for c in _cols_dim if c in df_out.columns]]
+              .drop_duplicates("CAMPO").reset_index(drop=True))
+    # ALPHA/BETA viven en la matriz M2; el metodo real del motor Suave (hibridos
+    # s11/s12) en la matriz M1 — el de Isotonica es trivialmente el propio.
+    df_dim = df_dim.merge(
+        pd.DataFrame(filas_m2).drop_duplicates("CAMPO")
+          [["CAMPO", "ALPHA", "BETA", "R2", "MAE_LOO", "ALERTA"]]
+          .rename(columns={"R2": "M2_R2", "MAE_LOO": "M2_MAE_LOO",
+                           "ALERTA": "M2_ALERTA"}),
+        on="CAMPO", how="left")
+    df_dim = df_dim.merge(
+        pd.DataFrame(filas_m1).query("MOTOR == 'Suave'")
+          .drop_duplicates("CAMPO")[["CAMPO", "METODO_REAL"]]
+          .rename(columns={"METODO_REAL": "METODO_REAL_SUAVE"}),
+        on="CAMPO", how="left")
+    ruta_dim = RESULTADOS / "dim_campo_modelo.csv"
+    df_dim.to_csv(ruta_dim, index=False, encoding="utf-8-sig")
+    print(f"  Dim campo-modelo (1 fila/campo): {ruta_dim} ({len(df_dim)} filas)")
+
+    # Metadata de la corrida (1 fila): evita repetir constantes globales por fila.
+    ruta_corrida = RESULTADOS / "dim_corrida.csv"
+    pd.DataFrame([{
+        "Q_OBJETIVO":        q_objetivo,
+        "VIGENCIA_BASE":     vigencia_base,
+        "FECHA_PREDICCION":  fecha_prediccion,
+        "BRENT_REF_USD_BBL": round(BRENT_REF, 2) if pd.notna(BRENT_REF) else None,
+        "N_CAMPOS":          int(df_dim["CAMPO"].nunique()),
+        "FECHA_EXPORT":      pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
+    }]).to_csv(ruta_corrida, index=False, encoding="utf-8-sig")
+    print(f"  Dim corrida (metadata): {ruta_corrida}")
+
     HISTORICO_DIR.mkdir(parents=True, exist_ok=True)
     nombre_snapshot = f"prediccion_{q_objetivo}_generada_{fecha_prediccion}.csv"
     ruta_snapshot = HISTORICO_DIR / nombre_snapshot
@@ -800,6 +1229,8 @@ if __name__ == "__main__":
     print(f"  Filas: {len(df_out)}")
     print(f"  Extrapolados: {df_out['ES_EXTRAPOLADO'].sum()} "
           f"({df_out['ES_EXTRAPOLADO'].mean():.0%} del total)")
+    print(f"  Clipped: {df_out['ES_CLIPPED'].sum()} "
+          f"({df_out['ES_CLIPPED'].mean():.0%} del total)")
 
     # Sanity final: extremos del grid
     brent_lo = int(brent_range[0]); brent_hi = int(brent_range[-1])
@@ -818,14 +1249,17 @@ if __name__ == "__main__":
         idx = ref.groupby(["CAMPO", "MOTOR"])["_dist"].idxmin()
         ref = ref.loc[idx]
         ref = ref[ref["VOLUMEN_1P_BASELINE_MBPE"].notna()]
-        # tolerancia = |curva(p@brent_cercano) − curva(p_ref)| ≈ paso de grilla
+        # Tolerancia 0.5 MBPE = criterio C5 (CLAUDE.md). Con el guard H1 (piso capado
+        # bajo p_ref) y BRENT_REF redondeado ANTES de p_ref (H2), el ancla debe ser
+        # exacta; la unica excepcion legitima es SIN_REANCLAJE.
         dif = (ref["VOLUMEN_1P_PREDICHO_MBPE"] - ref["VOLUMEN_1P_BASELINE_MBPE"]).abs()
-        piso = ref["PRECIO_NETO_EFECTIVO_USD_BBL"] < ref["BREAKEVEN_OPERACIONAL_USD_BBL"].fillna(-np.inf)
-        ok = ((dif <= 1.0) | piso).sum()
+        sin_anclaje = (ref["ALERTA_BK"] == "SIN_REANCLAJE") \
+            if "ALERTA_BK" in ref.columns else False
+        ok = ((dif <= 0.5) | sin_anclaje).sum()
         print(f"\n  Sanity re-anclaje @Brent~{BRENT_REF:.1f}: {ok}/{len(ref)} series "
-              f"con Vol=baseline (tol grilla $1) o en piso de abandono")
+              f"con Vol=baseline (tol 0.5 MBPE, C5) o SIN_REANCLAJE")
         if ok < len(ref):
-            peores = ref.loc[~((dif <= 1.0) | piso)].assign(_dif=dif)
+            peores = ref.loc[~((dif <= 0.5) | sin_anclaje)].assign(_dif=dif)
             print(peores.nlargest(5, "_dif")[["CAMPO", "MOTOR", "VOLUMEN_1P_PREDICHO_MBPE",
                                               "VOLUMEN_1P_BASELINE_MBPE"]].to_string(index=False))
 
@@ -860,8 +1294,11 @@ if __name__ == "__main__":
                 motivo = "filial_migracion"
             else:
                 motivo = "consolidado_sin_sens"
+        _c25 = cierre_2025.get(campo)
         rows_cob.append({"CAMPO": campo,
                          "BASELINE_1P_MBPE": round(float(vol), 2),
+                         "CIERRE_2025_MBPE": round(float(_c25), 2)
+                                             if _c25 is not None and pd.notna(_c25) else None,
                          "EN_PREDICCION": campo in presentes_en_matriz,
                          "MOTIVO_AUSENCIA": motivo})
 

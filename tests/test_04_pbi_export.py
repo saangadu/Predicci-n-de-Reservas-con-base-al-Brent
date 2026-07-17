@@ -1,4 +1,4 @@
-"""
+﻿"""
 test_04_pbi_export.py — Gate Fase 4: verifica los CSV de exportacion para Power BI
 
 Pruebas: ES_VIABLE correcto (marco neto), ES_EXTRAPOLADO presente, monotonia,
@@ -16,8 +16,8 @@ import pytest
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-STAGING    = ROOT / "datos" / "staging"
-RESULTADOS = ROOT / "resultados"
+# Paths por track (Produccion vs Calidad): centralizados en tests/conftest.py
+from rutas_track import STAGING, RESULTADOS  # noqa: E402
 CAMPOS_PILOTO = ["CASTILLA", "CASTILLA NORTE", "CASTILLA ESTE", "RUBIALES"]
 
 
@@ -60,17 +60,22 @@ def test_puntos_reales_export():
     assert ruta_m1.exists() and ruta_m2.exists(), "Faltan output_puntos_m1/m2.csv"
     pm1 = pd.read_csv(ruta_m1)
     pm2 = pd.read_csv(ruta_m2)
-    for c in ["IDX", "CAMPO", "SERIE", "AÑO", "PRECIO_NETO_USD_BBL",
+    for c in ["IDX", "CAMPO", "SERIE", "SERIE_COLOR", "AÑO", "PRECIO_NETO_USD_BBL",
               "DELTA_MBPE", "VOLUMEN_MBPE"]:
         assert c in pm1.columns, f"Falta {c} en output_puntos_m1.csv"
     for c in ["IDX", "CAMPO", "SERIE", "AÑO", "BRENT_USD_BBL", "PRECIO_NETO_USD_BBL"]:
         assert c in pm2.columns, f"Falta {c} en output_puntos_m2.csv"
-    # Gate dorado: series de modelo + reales + ancla presentes; ancla unica por campo
+    # Gate dorado: series de modelo + sensibilidad + baseline + ancla; ancla unica por campo.
+    # M1 renombro "Real {año}" -> "Sensibilidad {año}-Q{n}" (Q en la etiqueta, SERIE_COLOR
+    # agrupa por año) + nueva serie "Baseline {año}" (2026-07-16, directriz usuario).
     for campo in CAMPOS_PILOTO:
         sub = pm1[pm1["CAMPO"] == campo]
         series = set(sub["SERIE"].unique())
         assert {"Isotónica", "Suave", "Ancla"} <= series, f"{campo}: faltan series M1 {series}"
-        assert any(s.startswith("Real ") for s in series), f"{campo}: sin puntos reales M1"
+        assert any(s.startswith("Sensibilidad ") for s in series), \
+            f"{campo}: sin puntos de sensibilidad M1"
+        assert any(s.startswith("Baseline ") for s in series), \
+            f"{campo}: sin puntos de baseline M1"
         assert (sub["SERIE"] == "Ancla").sum() == 1, f"{campo}: ancla no unica"
         m2s = set(pm2[pm2["CAMPO"] == campo]["SERIE"].unique())
         assert "Recta" in m2s and any(s.startswith("Real ") for s in m2s), \
@@ -82,7 +87,7 @@ def test_columnas_obligatorias(df_export):
             "PRECIO_NETO_EFECTIVO_USD_BBL", "DELTA_PRED_MBPE",
             "VOLUMEN_1P_BASELINE_MBPE", "VOLUMEN_1P_PREDICHO_MBPE",
             "BRENT_REF_USD_BBL", "P_REF_USD_BBL", "M2_METODO", "M2_ES_FALLBACK",
-            "BREAKEVEN_FINANCIERO_USD_BBL", "BREAKEVEN_OPERACIONAL_USD_BBL",
+            "BREAKEVEN_USD_BBL", "PRECIO_EQUILIBRIO_USD_BBL",
             "ES_VIABLE", "ES_FULL_RESERVAS", "ES_EXTRAPOLADO",
             "NIVEL_CONFIANZA"]
     for c in cols:
@@ -132,7 +137,7 @@ def test_anclaje_vol_pref_igual_baseline(df_export):
                     & df_export["VOLUMEN_1P_BASELINE_MBPE"].notna()]
     assert not sub.empty, f"No existe la fila Brent={brent_ref} en el export"
     piso = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] < \
-        sub["BREAKEVEN_OPERACIONAL_USD_BBL"].fillna(-np.inf)
+        sub["PRECIO_EQUILIBRIO_USD_BBL"].fillna(-np.inf)
     dif = (sub["VOLUMEN_1P_PREDICHO_MBPE"] - sub["VOLUMEN_1P_BASELINE_MBPE"]).abs()
     bad = sub[~piso & (dif > 0.02)]
     assert bad.empty, (
@@ -141,11 +146,17 @@ def test_anclaje_vol_pref_igual_baseline(df_export):
 
 
 def test_hard_zero_sub_abandono(df_export):
-    """Piso duro del re-anclaje: Precio Aceite < BK abandono -> Vol = 0 exacto."""
-    sub = df_export[df_export["BREAKEVEN_OPERACIONAL_USD_BBL"].notna()
+    """Piso duro del re-anclaje: Precio Aceite < piso EFECTIVO -> Vol = 0 exacto.
+
+    Auditoria 2026-07-07 H1: el piso ya no es siempre el BK de abandono — si el BK
+    queda >= p_ref con baseline > 0 (BK falsificado por la certificacion vigente)
+    se capa a p_ref-1 y el export lo publica en PISO_EFECTIVO_USD_BBL."""
+    sub = df_export[df_export["PISO_EFECTIVO_USD_BBL"].notna()
                     & df_export["VOLUMEN_1P_BASELINE_MBPE"].notna()]
+    # margen 0.01: PISO_EFECTIVO se publica a 2dp; el hard-zero interno compara
+    # a precision completa y un empate de redondeo no es una violacion
     bajo_piso = sub[sub["PRECIO_NETO_EFECTIVO_USD_BBL"]
-                    < sub["BREAKEVEN_OPERACIONAL_USD_BBL"]]
+                    < sub["PISO_EFECTIVO_USD_BBL"] - 0.01]
     if bajo_piso.empty:
         pytest.skip("Ninguna fila bajo el piso de abandono en la grilla")
     no_cero = bajo_piso[bajo_piso["VOLUMEN_1P_PREDICHO_MBPE"] > 0]
@@ -155,9 +166,13 @@ def test_hard_zero_sub_abandono(df_export):
 
 
 def test_m2_fallback_visible(df_export):
-    """Tag visible del fallback M2: METODO y boolean coherentes en el export."""
-    fb = df_export[df_export["M2_ES_FALLBACK"]]
-    no_fb = df_export[~df_export["M2_ES_FALLBACK"]]
+    """Tag visible del fallback M2: METODO y boolean coherentes en el export.
+    Las filas de cobertura SIN_MODELO no tienen M2 (M2_ES_FALLBACK NaN) — se excluyen."""
+    con_m2 = df_export[df_export["M2_ES_FALLBACK"].notna()].copy()
+    # Con filas de cobertura el CSV mezcla True/False/NaN -> dtype object; castear a bool
+    con_m2["M2_ES_FALLBACK"] = con_m2["M2_ES_FALLBACK"].astype(bool)
+    fb = con_m2[con_m2["M2_ES_FALLBACK"]]
+    no_fb = con_m2[~con_m2["M2_ES_FALLBACK"]]
     assert (fb["M2_METODO"] == "FALLBACK_BETA_PORTAFOLIO").all(), \
         "M2_ES_FALLBACK=True con METODO distinto de FALLBACK_BETA_PORTAFOLIO"
     assert (no_fb["M2_METODO"] != "FALLBACK_BETA_PORTAFOLIO").all(), \
@@ -166,24 +181,25 @@ def test_m2_fallback_visible(df_export):
 
 def test_es_viable_usa_operacional(df_export):
     """
-    ES_VIABLE = PRECIO_NETO >= BREAKEVEN_OPERACIONAL (piso inferior, abandono).
-    El campo conserva alguna reserva (PDP) por encima de este piso.
+    ES_VIABLE = PRECIO_NETO >= PISO_EFECTIVO (BK abandono, capado bajo p_ref si
+    el BK esta falsificado por la certificacion — auditoria 2026-07-07 H1).
+    Debe coincidir con el hard-zero que aplica volumen_anclado.
     """
-    sub = df_export[df_export["BREAKEVEN_OPERACIONAL_USD_BBL"].notna()]
-    esperado = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] >= sub["BREAKEVEN_OPERACIONAL_USD_BBL"]
+    sub = df_export[df_export["PISO_EFECTIVO_USD_BBL"].notna()]
+    esperado = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] >= sub["PISO_EFECTIVO_USD_BBL"]
     bad = sub[sub["ES_VIABLE"] != esperado]
-    assert bad.empty, f"ES_VIABLE inconsistente con BREAKEVEN_OPERACIONAL en {len(bad)} filas"
+    assert bad.empty, f"ES_VIABLE inconsistente con PISO_EFECTIVO en {len(bad)} filas"
 
 
 def test_es_full_reservas_usa_financiero(df_export):
     """
-    ES_FULL_RESERVAS = PRECIO_NETO >= BREAKEVEN_FINANCIERO (piso superior, delta=0).
+    ES_FULL_RESERVAS = PRECIO_NETO >= BREAKEVEN (piso superior, delta=0).
     Escalera completa, sin castigo de PNP+PND.
     """
-    sub = df_export[df_export["BREAKEVEN_FINANCIERO_USD_BBL"].notna()]
-    esperado = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] >= sub["BREAKEVEN_FINANCIERO_USD_BBL"]
+    sub = df_export[df_export["BREAKEVEN_USD_BBL"].notna()]
+    esperado = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] >= sub["BREAKEVEN_USD_BBL"]
     bad = sub[sub["ES_FULL_RESERVAS"] != esperado]
-    assert bad.empty, f"ES_FULL_RESERVAS inconsistente con BREAKEVEN_FINANCIERO en {len(bad)} filas"
+    assert bad.empty, f"ES_FULL_RESERVAS inconsistente con BREAKEVEN en {len(bad)} filas"
 
 
 def test_es_full_reservas_implica_es_viable(df_export):
@@ -226,8 +242,9 @@ def test_reconstruccion_baseline_delta(df_export):
     if sub.empty:
         pytest.skip("No hay filas con BASELINE en export")
     reconstruido = np.maximum(sub["VOLUMEN_1P_BASELINE_MBPE"] + sub["DELTA_PRED_MBPE"], 0)
+    # Piso EFECTIVO (H1): BK capado bajo p_ref cuando la certificacion lo falsifica
     piso = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] < \
-        sub["BREAKEVEN_OPERACIONAL_USD_BBL"].fillna(-np.inf)
+        sub["PISO_EFECTIVO_USD_BBL"].fillna(-np.inf)
     reconstruido = np.where(piso, 0.0, reconstruido)
     diff = (reconstruido - sub["VOLUMEN_1P_PREDICHO_MBPE"]).abs()
     assert (diff < 0.1).all(), \
@@ -266,30 +283,32 @@ def test_brent_max_vol_positivo(df_export):
 
 def test_nivel_confianza_valido(df_export):
     """
-    NIVEL_CONFIANZA debe existir, sin NaN, y solo contener los 4 valores validos.
-    Campos con N_REAL_DELTA==0 en metricas.csv deben clasificarse SOLO_SINTETICO.
+    NIVEL_CONFIANZA debe existir, sin NaN, y solo contener los valores validos.
+    INSENSIBLE_PRECIO (antes SOLO_GAS/SOLO_SINTETICO, renombre 2026-07-15) = campo con
+    modelo pero sin deck real (N_REAL_DELTA==0). SIN_MODELO = campo de cobertura (cierre
+    pero sin deck ni BK).
     """
     assert "NIVEL_CONFIANZA" in df_export.columns, "NIVEL_CONFIANZA faltante en export"
     nulos = df_export["NIVEL_CONFIANZA"].isnull().sum()
     assert nulos == 0, f"NIVEL_CONFIANZA: {nulos} NaN en export"
 
-    valores_validos = {"ALTA", "MEDIA", "BAJA", "SOLO_SINTETICO"}
+    valores_validos = {"ALTA", "MEDIA", "BAJA", "INSENSIBLE_PRECIO", "SIN_MODELO"}
     invalidos = set(df_export["NIVEL_CONFIANZA"].unique()) - valores_validos
     assert not invalidos, f"Valores invalidos en NIVEL_CONFIANZA: {invalidos}"
 
-    # Campos SOLO_SINTETICO deben coincidir con N_REAL_DELTA==0 en metricas.csv
+    # Campos INSENSIBLE_PRECIO deben coincidir con N_REAL_DELTA==0 en metricas.csv (tienen modelo)
     met_path = STAGING / "metricas.csv"
     if not met_path.exists():
         pytest.skip("metricas.csv no existe")
     met = pd.read_csv(met_path)
     sin_real = set(met.loc[met["N_REAL_DELTA"].fillna(0) == 0, "CAMPO"])
 
-    solo_sint_export = set(
-        df_export.loc[df_export["NIVEL_CONFIANZA"] == "SOLO_SINTETICO", "CAMPO"].unique()
+    insensible_export = set(
+        df_export.loc[df_export["NIVEL_CONFIANZA"] == "INSENSIBLE_PRECIO", "CAMPO"].unique()
     )
-    # Todos los SOLO_SINTETICO del export deben tener N_REAL==0 en metricas
-    falsos = solo_sint_export - sin_real
-    assert not falsos, f"SOLO_SINTETICO en export pero N_REAL>0 en metricas: {falsos}"
+    # Todos los INSENSIBLE_PRECIO del export deben tener N_REAL==0 en metricas
+    falsos = insensible_export - sin_real
+    assert not falsos, f"INSENSIBLE_PRECIO en export pero N_REAL>0 en metricas: {falsos}"
 
 
 def test_gate_skill_en_confianza():
@@ -441,6 +460,34 @@ def test_comparacion_vs_anterior_existe():
                   "NIVEL_CONFIANZA_ANTERIOR", "NIVEL_CONFIANZA_NUEVO"]
     faltantes = [c for c in esperadas if c not in cols]
     assert not faltantes, f"Columnas faltantes en comparacion_vs_anterior.csv: {faltantes}"
+
+
+def test_dims_estrella_existen(df_export):
+    """
+    dim_campo_modelo.csv (1 fila/campo, atributos constantes) y dim_corrida.csv
+    (metadata de la corrida) alimentan el esquema estrella del tablero: las
+    matrices de hechos siguen intactas, el modelo PBI descarta las constantes.
+    """
+    ruta_dim = RESULTADOS / "dim_campo_modelo.csv"
+    ruta_cor = RESULTADOS / "dim_corrida.csv"
+    assert ruta_dim.exists(), "resultados/dim_campo_modelo.csv no existe"
+    assert ruta_cor.exists(), "resultados/dim_corrida.csv no existe"
+
+    dim = pd.read_csv(ruta_dim)
+    assert dim["CAMPO"].is_unique, "dim_campo_modelo: CAMPO duplicado"
+    faltantes = set(df_export["CAMPO"]) - set(dim["CAMPO"])
+    assert not faltantes, f"Campos de la matriz sin fila en la dim: {sorted(faltantes)[:5]}"
+    esperadas = ["TIPO_MODELO", "VOLUMEN_1P_BASELINE_MBPE", "BREAKEVEN_USD_BBL",
+                 "PRECIO_EQUILIBRIO_USD_BBL", "P_REF_USD_BBL", "NIVEL_CONFIANZA",
+                 "ALPHA", "BETA", "METODO_REAL_SUAVE"]
+    faltan_cols = [c for c in esperadas if c not in dim.columns]
+    assert not faltan_cols, f"Columnas faltantes en dim_campo_modelo: {faltan_cols}"
+
+    cor = pd.read_csv(ruta_cor)
+    assert len(cor) == 1, "dim_corrida debe tener exactamente 1 fila"
+    for c in ["Q_OBJETIVO", "VIGENCIA_BASE", "FECHA_PREDICCION",
+              "BRENT_REF_USD_BBL", "N_CAMPOS"]:
+        assert c in cor.columns, f"Columna faltante en dim_corrida: {c}"
 
 
 def test_changelog_predicciones_existe():
