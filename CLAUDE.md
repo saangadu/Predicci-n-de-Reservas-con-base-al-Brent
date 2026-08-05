@@ -4,9 +4,9 @@
 
 Modelo sustituto (surrogate model) que estima la sensibilidad volumétrica de reservas 1P frente
 al Precio Neto del crudo (Brent − Descuento Calidad − Descuento Transporte). Soporta decisiones
-de CAPEX en la Gerencia de Desarrollo de Ecopetrol.
+y genera alertas en la Gerencia de Desarrollo de Ecopetrol.
 
-**NO reemplaza**: SEC / EcoFaro / ARIES / Planning Space. Es soporte analítico interno.
+**NO reemplaza herramientas de análisis que facilitan dicho proceso como EcoFaro y Planning Space.** Es soporte analítico interno.
 
 **Proyecto top-level independiente**: Pipeline Python/ML desligado del tablero `.pbix` Histórico BU.
 Las reglas DAX y Power Query de ese proyecto no aplican aquí.
@@ -41,9 +41,9 @@ motor matemático, decisiones vigentes, supuestos y limitantes. Actualizar tras 
 - **s11 (2026-07-15) — Calidad con gates completos + M2 por familias + híbridos M1 (detalle: `docs/MAESTRO.md` §10 s11):**
   - **Calidad = mismo rigor que Producción**: `run_pipeline.py --calidad` corre pytest por fase + gate NORTE + `tests_calidad/`. G1/G2 duros en ambos tracks; G3/G5 comparativos en Calidad → `resultados_calidad/norte_divergencias.csv` (warning, no aborta). Nuevo `rutas_track.py` (paths por `PRED_TRACK`); los 8 tests de `tests/` lo importan.
   - **M2 por familias** (`m2_familias.py` + `analisis_m2.py`, offline): THEILSEN / DESCOMPUESTO (reincorpora Descuento de Calidad como f(Brent)) / SEGMENTADA / HUBER / CUADRATICA_MONOTONA, evaluadas por campo × dataset (solo-HIST vs HIST+CONSOLIDADO) con LOO-CV + gate físico. 92 campos adoptados (mejora media MAE_LOO 32.5%) → `seleccion_metodos_m2.csv`. Dispatch en `03b` bajo flag `PRED_M2_SELECCION` (ON en Calidad); `neto_desde_brent` generalizada vía `M2_PARAMS` JSON. Reporte `m2_r2_bajo.csv` (materiales con R2_LOO<0.9).
-  - **Híbridos M1** (`MotorHibrido` en `motores_modelo1.py` + `analisis_hibrido.py`): escalera isotónica de breakevens en `p ≤ p_junta` + motor candidato (Sigmoide/LinealRobusto/HuberIso/Suave/Plano) arriba, con C0, monotonía global y techo de asíntota (= máx delta de entrenamiento; sin él violaba G1 `asintota_iso`). 5 adopciones top-20: CASTILLA Sigmoide +28%, CASTILLA NORTE LinealRobusto +28%, PALAGUA Plano +27%, YARIGUI-CANTAGALLO LinealRobusto +19%, CHICHIMENE Suave +16%.
+  - **Híbridos M1** (`MotorHibrido` en `motores_modelo1.py` + `analisis_hibrido.py`): escalera isotónica de breakevens en `p ≤ p_junta` + motor candidato (Sigmoide/LinealRobusto/HuberIso/Suave/Plano) arriba, con C0, monotonía global y techo de asíntota (= máx delta de entrenamiento; sin él violaba G1 `asintota_iso`). 5 adopciones top-20 (detalle por campo y mejora de MAE en `docs/MAESTRO.md` §10 s11).
   - **Gobernanza `ADOPTADO_CALIDAD`**: Producción solo aplica `ADOPTADO`; Calidad aplica `ADOPTADO`+`ADOPTADO_CALIDAD` (ambos registros de selección). Promoción requiere ratificación de Finanzas.
-  - A/B (`comparar_tracks.py`, mecanismos acumulativos `B_confound+C_hibrido+D_m2`): MAE_LOYO gate CASTILLA 1.77→1.27, CHICHIMENE 4.27→3.58, CASTILLA NORTE 1.69→1.21; dif volúmenes @Brent 60/70/80 < 2 MBPE. Producción intacta: 229 passed / 9 skipped, sin re-freeze.
+  - A/B (`comparar_tracks.py`, mecanismos acumulativos `B_confound+C_hibrido+D_m2`): mejora de MAE_LOYO por campo del gate dorado (valores en `docs/MAESTRO.md` §10 s11); dif volúmenes @Brent 60/70/80 < 2 MBPE. Producción intacta: 229 passed / 9 skipped, sin re-freeze.
 
 ## Alcance previo (Fase 2 + Promoción Calidad→Producción — 2026-07-15)
 
@@ -60,8 +60,8 @@ motor matemático, decisiones vigentes, supuestos y limitantes. Actualizar tras 
 
 - **s5 (2026-07-10) — Directriz escalera/deck (`docs/DIRECTRIZ_ESCALERA_DECK.md`, ratificación finanzas pendiente):**
   - **Flag BK↔deck** (`01_etl.py`): `ALERTA=BK_CONTRADICHO_POR_DECK` + `resultados/bk_revision_finanzas.csv` (15 campos materiales ≥5 MBPE: Caño Limón, Chichimene, Casabe-like). NO cambia curvas.
-  - **Escalera suavizada** (`02_synthetic.py`): `TRANSICION_USD=6`, `CLIFF_FRAC=0.15`; escalón no cae >15%·baseline bajo el peor delta real junto a la banda (`ALERTA=ESCALON_SUAVIZADO`). Caño Limón sesgo-recup 36%→20%, recuperación Brent80 +34%→+18.7%.
-  - **Modelo plano deck** (`03_modelo.py::es_deck_plano` + `04`): rango deltas < 2%·baseline en ≥2 vigencias (N≥4) → curva plana = baseline sobre BK_PDP, `TIPO_MODELO=PLANO_DECK` (13 campos). PAUTO: −40%@Brent60 → plano 108.5.
+  - **Escalera suavizada** (`02_synthetic.py`): `TRANSICION_USD=6`, `CLIFF_FRAC=0.15`; escalón no cae >15%·baseline bajo el peor delta real junto a la banda (`ALERTA=ESCALON_SUAVIZADO`). Reduce el sesgo de recuperación en campos con salto de vigencia grande (caso y valores en `docs/MAESTRO.md` §10 s5).
+  - **Modelo plano deck** (`03_modelo.py::es_deck_plano` + `04`): rango deltas < 2%·baseline en ≥2 vigencias (N≥4) → curva plana = baseline sobre BK_PDP, `TIPO_MODELO=PLANO_DECK` (13 campos). Ej. PAUTO, deck con sensibilidad de precio nula (detalle en `docs/MAESTRO.md`).
   - **Gates LOYO** (`04::clasificar_confianza`): `N_VIGENCIAS_LOYO≥2` → gate usa `MAE_LOYO`/`SKILL_LOYO`; LOO fallback. Motivo muestra `metrica=LOYO` + ambos skills.
   - **Cobertura total** (`04::emitir_cobertura_plana`): cierre 2025 sin modelo → línea plana `NIVEL=SIN_MODELO` (57); `SOLO_SINTETICO`→`SOLO_GAS` (5). Export 131→**188 campos** (filiales fuera). TMDL: `# Campos Solo Gas` + `# Campos Sin Modelo`.
   - **Peso de recencia RECHAZADO** (`experimento_recencia.py`): 2×/3× a la última vigencia EMPEORA MAE_LOYO (N=9 amplifica ruido). Peso uniforme 1.0 confirmado.
@@ -70,7 +70,7 @@ motor matemático, decisiones vigentes, supuestos y limitantes. Actualizar tras 
 
 ## Alcance previo (Fase 2 + Normalización v2 + Agregación v3 — 2026-07-09)
 
-- **Campos**: portafolio completo con homologación a UNIFICADO (clave final = DIM_CAMPO.xlsx columna UNIFICADO). **Agregación v3 (s3)**: los componentes físicos de un UNIFICADO que coexisten (APIAY=APIAY+GAVAN+GUATIQUIA; LISAMA=LISAMA+NUTRIA+TESORO; etc.) **suman** su 1P en `01_etl.py` (antes coalesce `.first()`, que botaba volumen y falseaba la serie); precios ponderados por volumen (`_prom_ponderado`). PAUTO SUR fusionado en PAUTO; **CHICHIMENE SW re-fusionado en CHICHIMENE** vía `ALIAS_OVERRIDE` (serie continua 2023=149.7→2024=152.5→2025=174.3).
+- **Campos**: portafolio completo con homologación a UNIFICADO (clave final = DIM_CAMPO.xlsx columna UNIFICADO). **Agregación v3 (s3)**: los componentes físicos de un UNIFICADO que coexisten (APIAY=APIAY+GAVAN+GUATIQUIA; LISAMA=LISAMA+NUTRIA+TESORO; etc.) **suman** su 1P en `01_etl.py` (antes coalesce `.first()`, que botaba volumen y falseaba la serie); precios ponderados por volumen (`_prom_ponderado`). PAUTO SUR fusionado en PAUTO; **CHICHIMENE SW re-fusionado en CHICHIMENE** vía `ALIAS_OVERRIDE` (serie continua restaurada, valores en `docs/MAESTRO.md`).
 - **Gate dorado (pareto-9)**: RUBIALES, CASTILLA, CAÑO SUR ESTE, CASTILLA NORTE, AKACIAS, CHICHIMENE, LA CIRA, CUPIAGUA, YARIGUI-CANTAGALLO. PAUTO excluido (deck con sensibilidad=0 desde 2025_Q1, y 2026_Q1 aún 0). Excepciones G2 en `tests/test_norte.py::G2_EXCEPCIONES` (CHICHIMENE: solo SKILL, LOO negativo por salto de recertificación; MAE_REL pasa limpio).
 - **Tests**: 224 passed + 9 skipped (exenciones visibles). `run_pipeline.py` exit 0 (7 fases, ~12 min).
 - **Arquitectura vigente**:

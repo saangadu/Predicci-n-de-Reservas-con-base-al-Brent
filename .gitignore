@@ -1,6 +1,8 @@
 # Datos corporativos Ecopetrol (no subir a GitHub)
 datos/
 resultados/
+resultados_calidad/
+datos_calidad/
 docs/
 
 # Python
@@ -20,3 +22,12 @@ Tablero/**/.pbi/editorSettings.json
 # Respaldos y logs de recuperación
 Tablero_backup_*/
 pipeline_run.log
+*.zip
+Prediccion_backup*
+
+# Valores locales (volumenes/precios reales) usados en tests, no publicar
+tests/valores_locales.py
+tests_calidad/valores_locales.py
+
+# Auditoria interna pre-publicacion (contiene hallazgos de datos sensibles)
+docs/AUDITORIA_GITHUB.md

@@ -26,13 +26,12 @@ from rutas_track import STAGING  # noqa: E402
 FC_DIR = RAW / "Formatos FC"
 PLANTILLA = RAW / "Formatos FC" / "Formatos FC.xlsx"   # plantilla vacía (layout)
 
-# Golden de Breakeven.xlsm (Cierre 2024), clase D-PDP
-GOLDEN = {
-    ("datos/raw/Formatos FC/2024/RUBIALES_CF_SEC_09-Jan-2025.xlsx"):
-        {"fin": 24.562025, "ope": 67.792368},
-    ("datos/raw/Formatos FC/2024/CASTILLA_CF_SEC_23-Jan-2025.xlsx"):
-        {"fin": 28.809431, "ope": 66.613432},
-}
+# Golden de Breakeven.xlsm (Cierre 2024), clase D-PDP.
+# Cifras reales en tests/valores_locales.py (gitignored, no se publica en GitHub).
+try:
+    from valores_locales import GOLDEN_BREAKEVEN as GOLDEN
+except ImportError:
+    GOLDEN = {}
 TOL = 0.5
 
 

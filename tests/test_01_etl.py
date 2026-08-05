@@ -218,8 +218,9 @@ def test_delta_definido_cuando_hay_sensibilidad(tablon):
 
 def test_delta_usa_cierre_anterior(tablon):
     """Normalización v2 (2026-07-09): DELTA_SENS = VOL_SENS − cierre A−1, no cierre A.
-    CASTILLA 2024_Q1: 174.6 − 175.249 (cierre 2023) ≈ −0.65 MBPE. Con la semántica
-    vieja (cierre 2024 = 158.647) daría +15.95 — el confound."""
+    Caso conocido: CASTILLA 2024_Q1 (cifras reales en docs/MAESTRO.md §10 s3/s5,
+    no publicadas). Con la semántica vieja (cierre A en vez de A−1) el confound
+    aparecía como salto positivo espurio."""
     fila = tablon[(tablon["CAMPO"] == "CASTILLA")
                   & (tablon["VIGENCIA"] == "2024_Q1")]
     if fila.empty:
