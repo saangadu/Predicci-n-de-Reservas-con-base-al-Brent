@@ -52,11 +52,16 @@ def real_del_quarter(df: pd.DataFrame, q: str) -> pd.DataFrame:
             .reset_index())
 
 
-def prediccion_en_brent(snapshot: Path, brent_real: float) -> pd.DataFrame:
-    """Del snapshot, la prediccion Isotonica en la fila de Brent mas cercana al real."""
+def prediccion_en_brent(snapshot: Path, reales: pd.DataFrame) -> pd.DataFrame:
+    """Del snapshot, la prediccion Isotonica en la fila de Brent mas cercana al real
+    DE CADA CAMPO (fix 2026-08-05: antes se usaba un unico Brent — el primero no-nulo
+    del quarter — para todo el portafolio, lo cual es incorrecto si el Brent real
+    difiere por campo, p.ej. por fecha de cierre de vigencia distinta). `reales`
+    trae columnas CAMPO/BRENT_REAL."""
     pred = pd.read_csv(snapshot)
     pred = pred[pred["MOTOR"] == "Isotonica"].copy()
-    pred["_dist"] = (pred["BRENT_USD_BBL"] - brent_real).abs()
+    pred = pred.merge(reales[["CAMPO", "BRENT_REAL"]], on="CAMPO", how="inner")
+    pred["_dist"] = (pred["BRENT_USD_BBL"] - pred["BRENT_REAL"]).abs()
     idx = pred.groupby("CAMPO")["_dist"].idxmin()
     cols = ["CAMPO", "BRENT_USD_BBL", "VOLUMEN_1P_PREDICHO_MBPE", "NIVEL_CONFIANZA"]
     cols = [c for c in cols if c in pred.columns]
@@ -83,18 +88,23 @@ if __name__ == "__main__":
         if reales.empty:
             print(f"  {q}: dato real aun no disponible en el Consolidado — pendiente.")
             continue
-        brent_real = float(reales["BRENT_REAL"].dropna().iloc[0]) \
-            if reales["BRENT_REAL"].notna().any() else np.nan
-        if pd.isna(brent_real):
-            print(f"  [WARN] {q}: sin Brent real en el tablon, omitiendo.")
+        sin_brent = reales["BRENT_REAL"].isna().sum()
+        if sin_brent:
+            print(f"  [WARN] {q}: {sin_brent} campos sin Brent real en el tablon, se omiten.")
+        reales_con_brent = reales[reales["BRENT_REAL"].notna()]
+        if reales_con_brent.empty:
+            print(f"  [WARN] {q}: ningun campo con Brent real, omitiendo quarter.")
             continue
-        pred = prediccion_en_brent(snap, brent_real)
-        m = pred.merge(reales[["CAMPO", "REAL_MBPE"]], on="CAMPO", how="inner")
+        # Brent real POR CAMPO (fix: antes se aplicaba un unico Brent a todo el
+        # portafolio — ver docstring de prediccion_en_brent).
+        pred = prediccion_en_brent(snap, reales_con_brent)
+        m = pred.merge(reales_con_brent[["CAMPO", "REAL_MBPE"]], on="CAMPO", how="inner")
         m["Q_OBJETIVO"] = q
         m["ERROR_MBPE"] = (m["PRED_MBPE"] - m["REAL_MBPE"]).round(2)
         m["ERROR_REL"] = (m["ERROR_MBPE"] / m["REAL_MBPE"].replace(0, np.nan)).round(4)
         filas.append(m)
-        print(f"  {q}: {len(m)} campos comparados (Brent real ~${brent_real:.1f}, "
+        brent_real = reales_con_brent["BRENT_REAL"].mean()
+        print(f"  {q}: {len(m)} campos comparados (Brent real promedio ~${brent_real:.1f}, "
               f"snapshot {snap.name})")
         print(f"     MAE portafolio: {m['ERROR_MBPE'].abs().mean():.2f} MBPE | "
               f"mediana error rel: {m['ERROR_REL'].abs().median():.1%}")

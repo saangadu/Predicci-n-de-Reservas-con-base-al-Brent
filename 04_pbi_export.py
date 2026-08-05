@@ -43,6 +43,7 @@ import pandas as pd
 
 from motores_modelo1 import piso_efectivo, volumen_anclado
 from track import sufijo_track, flag
+from registro_predicciones import registrar_corrida
 
 _SUF = sufijo_track()   # '' Produccion; '_calidad' si PRED_TRACK=calidad
 BASE_DIR    = Path(__file__).parent
@@ -620,8 +621,23 @@ def generar_comparacion_vs_anterior(df_out, q_objetivo, brent_ref, ruta_actual):
     return merged
 
 
+# Umbral de materialidad para no saturar el changelog con corridas casi
+# identicas (2026-08-05): 16 snapshots consecutivos con movimientos sub-1%
+# ya representaban la mayoria del archivo. Por debajo de este umbral no se
+# agrega entrada — el snapshot y el registro (registro_predicciones.py)
+# igual quedan disponibles para auditoria completa.
+CHANGELOG_DIF_MIN_MBPE = 1.0
+
+
 def actualizar_changelog(q_objetivo, fecha, n_campos, comp) -> None:
-    """Agrega entrada fechada a docs/CHANGELOG_PREDICCIONES.md."""
+    """Agrega entrada fechada a docs/CHANGELOG_PREDICCIONES.md, salvo que el
+    movimiento maximo vs la corrida anterior sea inmaterial (throttle)."""
+    if comp is not None and not comp.empty:
+        dif_max = comp["DIF_ABS_MBPE"].abs().max()
+        if pd.notna(dif_max) and dif_max < CHANGELOG_DIF_MIN_MBPE:
+            print(f"  Changelog no actualizado: max |DIF_ABS_MBPE|={dif_max:.2f} "
+                  f"< umbral {CHANGELOG_DIF_MIN_MBPE} (movimiento inmaterial)")
+            return
     ruta = BASE_DIR / "docs" / "CHANGELOG_PREDICCIONES.md"
     if not ruta.exists():
         ruta.write_text("# Changelog de Predicciones\n\n"
@@ -1263,6 +1279,17 @@ if __name__ == "__main__":
     ruta_snapshot = HISTORICO_DIR / nombre_snapshot
     shutil.copy2(ruta_csv, ruta_snapshot)
     print(f"  Snapshot fechado: {ruta_snapshot}")
+
+    # Registro estructurado (additivo, no cambia ningun output existente):
+    # permite comparar corridas sin re-parsear el CSV completo cada vez.
+    try:
+        registrar_corrida(df_out, q_objetivo, vigencia_base,
+                          round(BRENT_REF, 2) if pd.notna(BRENT_REF) else None,
+                          fecha_prediccion, nombre_snapshot,
+                          track=_SUF.lstrip("_") or "produccion",
+                          resultados_dir=RESULTADOS)
+    except Exception as e:
+        print(f"  [WARN] registro_predicciones no se pudo actualizar: {e}")
 
     print(f"\nMatriz exportada: {ruta_csv}")
     print(f"  Filas: {len(df_out)}")
