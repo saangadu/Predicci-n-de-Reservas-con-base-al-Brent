@@ -33,13 +33,10 @@ RESULTADOS = BASE_DIR / f"resultados{_SUF}"
 RESULTADOS.mkdir(parents=True, exist_ok=True)
 
 # ── Rutas FC (externas read-only, portafolio completo) ────────────────────────
-FC_DIR_EXT_2024 = Path(
-    r"C:\Users\ECOPETROL\Documents\GALLEGO\RR\2024\FC Finales\Ecopetrol"
-)
-FC_DIR_EXT_2025 = Path(
-    r"C:\Users\ECOPETROL\Documents\GALLEGO\RR\2025\FC Finales"
-    r"\Departamento de Recursos y Reservas - Finales GCR"
-)
+# Rutas locales del entorno del autor, no publicadas. Ajustar o dejar en None
+# para usar siempre FC_DIR_LOCAL (fallback abajo).
+FC_DIR_EXT_2024 = Path(r"C:\ruta\a\FC_Finales\2024")
+FC_DIR_EXT_2025 = Path(r"C:\ruta\a\FC_Finales\2025")
 FC_DIR_LOCAL = BASE_DIR / "datos" / "raw" / "Formatos FC"
 
 
