@@ -218,9 +218,14 @@ def test_delta_definido_cuando_hay_sensibilidad(tablon):
 
 def test_delta_usa_cierre_anterior(tablon):
     """Normalización v2 (2026-07-09): DELTA_SENS = VOL_SENS − cierre A−1, no cierre A.
-    Caso conocido: CASTILLA 2024_Q1 (cifras reales en docs/MAESTRO.md §10 s3/s5,
-    no publicadas). Con la semántica vieja (cierre A en vez de A−1) el confound
+    Caso conocido: CASTILLA 2024_Q1 (cifras reales en tests/valores_locales.py,
+    gitignored). Con la semántica vieja (cierre A en vez de A−1) el confound
     aparecía como salto positivo espurio."""
+    try:
+        from valores_locales import (CASTILLA_BASELINE_2024Q1_MBPE,
+                                      CASTILLA_CHECKPOINT_2024Q1_MBPE)
+    except ImportError:
+        pytest.skip("tests/valores_locales.py no disponible (cifras reales, no publicadas)")
     fila = tablon[(tablon["CAMPO"] == "CASTILLA")
                   & (tablon["VIGENCIA"] == "2024_Q1")]
     if fila.empty:
@@ -229,11 +234,11 @@ def test_delta_usa_cierre_anterior(tablon):
     esperado = r["VOLUMEN_1P_SENSIBILIDAD_MBPE"] - r["BASELINE_1P_MBPE"]
     assert abs(r["DELTA_SENS_MBPE"] - esperado) < 1e-6
     assert r["DELTA_SENS_MBPE"] < 0, \
-        f"DELTA 2024_Q1 debería ser ≈−0.65 (vs cierre 2023); da {r['DELTA_SENS_MBPE']:.2f}"
-    assert abs(r["BASELINE_1P_MBPE"] - 175.249) < 0.01, \
-        f"BASELINE de vigencia 2024 debe ser el cierre 2023 (175.249), da {r['BASELINE_1P_MBPE']}"
-    assert abs(r["CHECKPOINT_1P_MBPE"] - 158.647) < 0.01, \
-        f"CHECKPOINT de vigencia 2024 debe ser el cierre 2024 (158.647), da {r['CHECKPOINT_1P_MBPE']}"
+        f"DELTA 2024_Q1 debería ser negativo (vs cierre 2023); da {r['DELTA_SENS_MBPE']:.2f}"
+    assert abs(r["BASELINE_1P_MBPE"] - CASTILLA_BASELINE_2024Q1_MBPE) < 0.01, \
+        f"BASELINE de vigencia 2024 debe ser el cierre 2023, da {r['BASELINE_1P_MBPE']}"
+    assert abs(r["CHECKPOINT_1P_MBPE"] - CASTILLA_CHECKPOINT_2024Q1_MBPE) < 0.01, \
+        f"CHECKPOINT de vigencia 2024 debe ser el cierre 2024, da {r['CHECKPOINT_1P_MBPE']}"
 
 
 def test_sin_baseline_anterior_flaggeado(tablon):
