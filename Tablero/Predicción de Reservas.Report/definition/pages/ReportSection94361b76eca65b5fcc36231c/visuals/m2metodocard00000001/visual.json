@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
-  "name": "d4aa59757e7be5fde2ad",
+  "name": "m2metodocard00000001",
   "position": {
-    "x": 1680,
-    "y": 680,
-    "z": 14000,
+    "x": 1440,
+    "y": 568,
+    "z": 12400,
     "height": 96,
     "width": 216,
-    "tabOrder": 14000
+    "tabOrder": 12400
   },
   "visual": {
     "visualType": "cardVisual",
@@ -25,14 +25,14 @@
                           "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "Divergencia Motores (%)"
+                      "Property": "M2 Método"
                     }
                   },
-                  "Function": 1
+                  "Function": 3
                 }
               },
-              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
-              "nativeQueryRef": "Avg of Divergencia Motores (%)"
+              "queryRef": "Min(Modelo Campo.M2 Método)",
+              "nativeQueryRef": "Min of M2 Método"
             }
           ]
         }
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "20D"
                 }
               }
             }
@@ -84,7 +84,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Divergencia Motores'"
+                  "Value": "'Método M2'"
                 }
               }
             }

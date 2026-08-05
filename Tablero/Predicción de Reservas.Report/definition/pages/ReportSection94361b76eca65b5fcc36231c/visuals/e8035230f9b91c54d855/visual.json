@@ -2,12 +2,12 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "e8035230f9b91c54d855",
   "position": {
-    "x": 1680.48,
-    "y": 574.56,
-    "z": 19001,
-    "height": 127.44,
+    "x": 1680,
+    "y": 568,
+    "z": 16000,
+    "height": 96,
     "width": 216,
-    "tabOrder": 19001
+    "tabOrder": 16000
   },
   "visual": {
     "visualType": "cardVisual",
@@ -25,14 +25,14 @@
                           "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "M2 R² LOO"
+                      "Property": "M2 MAE LOO"
                     }
                   },
                   "Function": 1
                 }
               },
-              "queryRef": "Average(Modelo Campo.M2 R² LOO)",
-              "nativeQueryRef": "Promedio de M2 R² LOO"
+              "queryRef": "Avg(Modelo Campo.M2 MAE LOO)",
+              "nativeQueryRef": "Avg of M2 MAE LOO"
             }
           ]
         }
@@ -87,7 +87,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'R² LOO (M2)'"
+                  "Value": "'MAE LOO (M2)'"
                 }
               }
             }

@@ -2,12 +2,12 @@
 table _Medidas
 	lineageTag: 5bdd61f1-b1ba-4ca0-bec3-8a66345d2c0f
 
-	/// Suma del volumen 1P predicho. Por defecto usa el motor Isotonica y el ambiente Producción si no hay uno seleccionado (evita doble conteo entre motores y entre tracks). Responde al slicer de Brent y al de Ambiente.
+	/// Suma del volumen 1P predicho. Por defecto usa el motor Isotonica y el ambiente Producción si no hay uno seleccionado (evita doble conteo entre motores y entre tracks). Responde al slicer de Brent y al de Ambiente. Fix 2026-07-17: TREATAS desde Modelo Campo (dim hoja) para que el slicer de Nivel Confianza filtre también el lado Predicción (antes solo filtraba Cierre/Baseline y el Δ vs Certificado se inflaba).
 	measure 'Vol 1P Predicho' =
 			VAR _motor = IF ( HASONEVALUE ( 'Motor'[Motor] ), VALUES ( 'Motor'[Motor] ), "Isotonica" )
 			VAR _amb = IF ( HASONEVALUE ( 'Ambiente'[Ambiente] ), VALUES ( 'Ambiente'[Ambiente] ), "Producción" )
 			RETURN
-			CALCULATE ( SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] ), KEEPFILTERS ( 'Motor'[Motor] = _motor ), KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ) )
+			CALCULATE ( SUM ( 'Predicción'[Volumen 1P Predicho (MBPE)] ), KEEPFILTERS ( 'Motor'[Motor] = _motor ), KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ), KEEPFILTERS ( TREATAS ( VALUES ( 'Modelo Campo'[Campo Clave] ), 'Campo'[Campo] ) ) )
 		formatString: 0.0000
 		displayFolder: 1. Volumen
 		lineageTag: e7cec50d-8099-40d8-b177-83a1b40dfc11
@@ -408,7 +408,8 @@ table _Medidas
 						)
 					),
 				KEEPFILTERS ( 'Motor'[Motor] = _motor ),
-				KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb )
+				KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ),
+				KEEPFILTERS ( TREATAS ( VALUES ( 'Modelo Campo'[Campo Clave] ), 'Campo'[Campo] ) )
 			)
 		formatString: #,##0.0
 		displayFolder: 4. Comparativa Ambientes
@@ -431,7 +432,8 @@ table _Medidas
 						)
 					),
 				KEEPFILTERS ( 'Motor'[Motor] = _motor ),
-				KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb )
+				KEEPFILTERS ( 'Ambiente'[Ambiente] = _amb ),
+				KEEPFILTERS ( TREATAS ( VALUES ( 'Modelo Campo'[Campo Clave] ), 'Campo'[Campo] ) )
 			)
 		formatString: #,##0.0
 		displayFolder: 4. Comparativa Ambientes

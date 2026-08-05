@@ -2,11 +2,11 @@
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
   "name": "m1CardNReal00000001",
   "position": {
-    "x": 32,
+    "x": 960,
     "y": 866,
     "z": 8000,
     "height": 170,
-    "width": 448,
+    "width": 216,
     "tabOrder": 8000
   },
   "visual": {

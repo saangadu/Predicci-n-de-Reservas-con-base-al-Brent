@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
-  "name": "d4aa59757e7be5fde2ad",
+  "name": "m1MetodoPrim0000001",
   "position": {
-    "x": 1680,
-    "y": 680,
-    "z": 14000,
-    "height": 96,
+    "x": 32,
+    "y": 866,
+    "z": 20300,
+    "height": 170,
     "width": 216,
-    "tabOrder": 14000
+    "tabOrder": 20300
   },
   "visual": {
     "visualType": "cardVisual",
@@ -25,14 +25,14 @@
                           "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "Divergencia Motores (%)"
+                      "Property": "Método Primario"
                     }
                   },
-                  "Function": 1
+                  "Function": 3
                 }
               },
-              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
-              "nativeQueryRef": "Avg of Divergencia Motores (%)"
+              "queryRef": "Min(Modelo Campo.Método Primario)",
+              "nativeQueryRef": "Min of Método Primario"
             }
           ]
         }
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "24D"
                 }
               }
             }
@@ -84,7 +84,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Divergencia Motores'"
+                  "Value": "'Método Primario (M1)'"
                 }
               }
             }

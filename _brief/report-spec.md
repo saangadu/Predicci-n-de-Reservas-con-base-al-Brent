@@ -3,7 +3,7 @@
 ## Report identity
 - Report name: Predicción de Reservas 1P vs Brent
 - Semantic model: Predicción de Reservas (live PBI Desktop; star schema, 24 measures)
-- Audience: Gerencia de Desarrollo (decisión CAPEX) + analista técnico (drill)
+- Audience: Gerencia de Desarrollo (decisiones) + analista técnico (drill)
 - Primary purpose: leer el 1P del portafolio a un Brent de escenario, ver la sensibilidad al precio, y saber dónde el modelo es confiable
 - Delivery target: PBIP local (sin publicación Fabric)
 

@@ -57,6 +57,9 @@ m2 = importlib.import_module("03b_correlacion_brent")
 BRENT_PASO = 1
 MARGEN_BRENT_USD  = 10    # margen sobre la banda del Consolidado para el meshgrid
 MARGEN_EXTRAP_USD = 5.0   # margen para marcar ES_EXTRAPOLADO por campo
+# Rampa de salida para campos INSENSIBLE_PRECIO (directriz escalera §4ter, 2026-07-17):
+# misma anchura que el suavizado de escalera de 02_synthetic (TRANSICION_USD).
+TRANSICION_SALIDA_USD = 6.0
 
 # ── Umbrales de confianza (ajustables) ───────────────────────────────────────
 CONFIANZA_N_REAL_MIN    = 6
@@ -177,6 +180,22 @@ def construir_puntos_reales(df, filas_m1, filas_m2, baselines, anclaje):
             "DELTA_MBPE": r["DELTA_ANCLADO_MBPE"],
             "VOLUMEN_MBPE": r["VOLUMEN_1P_PREDICHO_MBPE"],
         })
+        # Banda LOYO P25/P75 como series propias (solo motor primario): el tablero
+        # las pinta punteadas alrededor de la curva, mismo patron que el Ejecutivo.
+        if r["MOTOR"] == "Isotonica" and r.get("VOL_P25_MBPE") is not None:
+            base = baselines.get(r["CAMPO"], np.nan)
+            for serie_b, vol_b in (("Banda P25", r["VOL_P25_MBPE"]),
+                                   ("Banda P75", r["VOL_P75_MBPE"])):
+                reg_m1.append({
+                    "CAMPO": r["CAMPO"],
+                    "SERIE": serie_b,
+                    "SERIE_COLOR": serie_b,
+                    "AÑO": None,
+                    "PRECIO_NETO_USD_BBL": r["PRECIO_ACEITE_USD_BBL"],
+                    "DELTA_MBPE": round(float(vol_b) - float(base), 2)
+                                  if pd.notna(base) else None,
+                    "VOLUMEN_MBPE": vol_b,
+                })
     reales = df[(~df["ES_SINTETICO"]) & (~df["ES_BASELINE"])
                 & df["DELTA_SENS_MBPE"].notna() & df["PRECIO_NETO_USD_BBL"].notna()]
     for _, r in reales.iterrows():
@@ -856,8 +875,15 @@ if __name__ == "__main__":
             if not pd.notna(baseline):
                 return np.full(len(neto), np.nan)
             if es_plano:
-                return np.where(np.asarray(neto, dtype=float) >= _piso_plano,
-                                float(baseline), 0.0)
+                _neto = np.asarray(neto, dtype=float)
+                if tipo_modelo == "INSENSIBLE_PRECIO" and np.isfinite(_piso_plano):
+                    # Directriz §4ter (2026-07-17): sin deck real el escalon duro en el
+                    # piso era el cliff mas violento del portafolio; rampa lineal de
+                    # salida en los TRANSICION_SALIDA_USD bajo el piso (reservas plenas
+                    # arriba intactas). PLANO_DECK conserva el escalon (tiene deck real).
+                    return np.clip((_neto - (_piso_plano - TRANSICION_SALIDA_USD))
+                                   / TRANSICION_SALIDA_USD, 0.0, 1.0) * float(baseline)
+                return np.where(_neto >= _piso_plano, float(baseline), 0.0)
             return volumen_anclado(modelo, neto, baseline, d_ref, _bk_dura, p_ref=_p_ref_f)
 
         # ── Matriz M2 pura: Brent -> Precio Aceite ────────────────────────────
@@ -870,6 +896,7 @@ if __name__ == "__main__":
                 "ALPHA":                  coef.get("ALPHA"),
                 "BETA":                   coef.get("BETA"),
                 "M2_METODO":              m2_metodo,
+                "M2_DATASET":             coef.get("DATASET", "HIST"),
                 "M2_ES_FALLBACK":         m2_fallback,
                 "N_PUNTOS":               coef.get("N_PUNTOS"),
                 "R2":                     coef.get("R2"),
@@ -937,8 +964,13 @@ if __name__ == "__main__":
                 pn_r = round(pn, 2)
                 # ES_VIABLE contra el piso EFECTIVO: debe coincidir con el hard-zero
                 # que aplica volumen_anclado (H1) — si no, el tablero mostraria
-                # ES_VIABLE=False con volumen > 0
-                es_viable = (pn_r >= round(_bk_eff, 2)) if _bk_eff is not None else True
+                # ES_VIABLE=False con volumen > 0. Para INSENSIBLE_PRECIO la rampa
+                # (§4ter) mantiene volumen > 0 hasta piso − TRANSICION_SALIDA_USD:
+                # el umbral de viabilidad baja al inicio de la rampa.
+                _bk_viable = _bk_eff
+                if _bk_eff is not None and tipo_modelo == "INSENSIBLE_PRECIO":
+                    _bk_viable = _bk_eff - TRANSICION_SALIDA_USD
+                es_viable = (pn_r >= round(_bk_viable, 2)) if _bk_viable is not None else True
                 es_full   = (pn_r >= round(bk_fin, 2)) if pd.notna(bk_fin) else True
                 es_extrap = (float(brent) < bk_min_hist - MARGEN_EXTRAP_USD or
                              float(brent) > bk_max_hist + MARGEN_EXTRAP_USD)
@@ -1194,7 +1226,7 @@ if __name__ == "__main__":
     # s11/s12) en la matriz M1 — el de Isotonica es trivialmente el propio.
     df_dim = df_dim.merge(
         pd.DataFrame(filas_m2).drop_duplicates("CAMPO")
-          [["CAMPO", "ALPHA", "BETA", "R2", "MAE_LOO", "ALERTA"]]
+          [["CAMPO", "ALPHA", "BETA", "R2", "MAE_LOO", "ALERTA", "M2_DATASET"]]
           .rename(columns={"R2": "M2_R2", "MAE_LOO": "M2_MAE_LOO",
                            "ALERTA": "M2_ALERTA"}),
         on="CAMPO", how="left")

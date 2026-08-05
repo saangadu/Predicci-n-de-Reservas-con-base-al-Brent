@@ -150,13 +150,17 @@ def test_hard_zero_sub_abandono(df_export):
 
     Auditoria 2026-07-07 H1: el piso ya no es siempre el BK de abandono — si el BK
     queda >= p_ref con baseline > 0 (BK falsificado por la certificacion vigente)
-    se capa a p_ref-1 y el export lo publica en PISO_EFECTIVO_USD_BBL."""
+    se capa a p_ref-1 y el export lo publica en PISO_EFECTIVO_USD_BBL.
+
+    Directriz §4ter (2026-07-17): INSENSIBLE_PRECIO sale por rampa lineal en los
+    6 USD bajo el piso (no escalon) — el hard-zero para ellos rige bajo piso-6."""
     sub = df_export[df_export["PISO_EFECTIVO_USD_BBL"].notna()
-                    & df_export["VOLUMEN_1P_BASELINE_MBPE"].notna()]
+                    & df_export["VOLUMEN_1P_BASELINE_MBPE"].notna()].copy()
+    insensible = sub["TIPO_MODELO"] == "INSENSIBLE_PRECIO"
+    piso_hz = sub["PISO_EFECTIVO_USD_BBL"] - np.where(insensible, 6.0, 0.0)
     # margen 0.01: PISO_EFECTIVO se publica a 2dp; el hard-zero interno compara
     # a precision completa y un empate de redondeo no es una violacion
-    bajo_piso = sub[sub["PRECIO_NETO_EFECTIVO_USD_BBL"]
-                    < sub["PISO_EFECTIVO_USD_BBL"] - 0.01]
+    bajo_piso = sub[sub["PRECIO_NETO_EFECTIVO_USD_BBL"] < piso_hz - 0.01]
     if bajo_piso.empty:
         pytest.skip("Ninguna fila bajo el piso de abandono en la grilla")
     no_cero = bajo_piso[bajo_piso["VOLUMEN_1P_PREDICHO_MBPE"] > 0]
@@ -184,9 +188,13 @@ def test_es_viable_usa_operacional(df_export):
     ES_VIABLE = PRECIO_NETO >= PISO_EFECTIVO (BK abandono, capado bajo p_ref si
     el BK esta falsificado por la certificacion — auditoria 2026-07-07 H1).
     Debe coincidir con el hard-zero que aplica volumen_anclado.
+    INSENSIBLE_PRECIO (directriz §4ter): el umbral baja al inicio de la rampa
+    (piso - 6), donde el volumen empieza a ser > 0.
     """
-    sub = df_export[df_export["PISO_EFECTIVO_USD_BBL"].notna()]
-    esperado = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] >= sub["PISO_EFECTIVO_USD_BBL"]
+    sub = df_export[df_export["PISO_EFECTIVO_USD_BBL"].notna()].copy()
+    insensible = sub["TIPO_MODELO"] == "INSENSIBLE_PRECIO"
+    piso_v = (sub["PISO_EFECTIVO_USD_BBL"] - np.where(insensible, 6.0, 0.0)).round(2)
+    esperado = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] >= piso_v
     bad = sub[sub["ES_VIABLE"] != esperado]
     assert bad.empty, f"ES_VIABLE inconsistente con PISO_EFECTIVO en {len(bad)} filas"
 
@@ -242,9 +250,12 @@ def test_reconstruccion_baseline_delta(df_export):
     if sub.empty:
         pytest.skip("No hay filas con BASELINE en export")
     reconstruido = np.maximum(sub["VOLUMEN_1P_BASELINE_MBPE"] + sub["DELTA_PRED_MBPE"], 0)
-    # Piso EFECTIVO (H1): BK capado bajo p_ref cuando la certificacion lo falsifica
-    piso = sub["PRECIO_NETO_EFECTIVO_USD_BBL"] < \
-        sub["PISO_EFECTIVO_USD_BBL"].fillna(-np.inf)
+    # Piso EFECTIVO (H1): BK capado bajo p_ref cuando la certificacion lo falsifica.
+    # INSENSIBLE_PRECIO (§4ter): su delta ya codifica la rampa (vol - baseline) —
+    # no se fuerza a 0 bajo el piso.
+    piso = (sub["PRECIO_NETO_EFECTIVO_USD_BBL"]
+            < sub["PISO_EFECTIVO_USD_BBL"].fillna(-np.inf)) \
+        & (sub["TIPO_MODELO"] != "INSENSIBLE_PRECIO")
     reconstruido = np.where(piso, 0.0, reconstruido)
     diff = (reconstruido - sub["VOLUMEN_1P_PREDICHO_MBPE"]).abs()
     assert (diff < 0.1).all(), \

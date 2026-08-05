@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
-  "name": "d4aa59757e7be5fde2ad",
+  "name": "m2DatasetCard000001",
   "position": {
-    "x": 1680,
-    "y": 680,
-    "z": 14000,
-    "height": 96,
+    "x": 264,
+    "y": 656,
+    "z": 20200,
+    "height": 170,
     "width": 216,
-    "tabOrder": 14000
+    "tabOrder": 20200
   },
   "visual": {
     "visualType": "cardVisual",
@@ -25,14 +25,14 @@
                           "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "Divergencia Motores (%)"
+                      "Property": "M2 Dataset"
                     }
                   },
-                  "Function": 1
+                  "Function": 3
                 }
               },
-              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
-              "nativeQueryRef": "Avg of Divergencia Motores (%)"
+              "queryRef": "Min(Modelo Campo.M2 Dataset)",
+              "nativeQueryRef": "Min of M2 Dataset"
             }
           ]
         }
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "24D"
                 }
               }
             }
@@ -84,7 +84,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Divergencia Motores'"
+                  "Value": "'Dataset M2'"
                 }
               }
             }

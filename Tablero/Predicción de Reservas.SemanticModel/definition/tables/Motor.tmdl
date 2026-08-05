@@ -13,15 +13,6 @@ table Motor
 		sourceColumn: MOTOR
 		sortByColumn: Orden
 
-	/// Etiqueta de negocio del rol — usar ESTA columna en visuales nuevos en vez de la
-	/// clave técnica 'Motor' (taxonomía s13: Rol = Primario/Validación; Método = algoritmo real).
-	column Rol
-		dataType: string
-		lineageTag: 771c7b4e-073d-4022-84b8-7168c41b58b1
-		summarizeBy: none
-		sourceColumn: ROL
-		sortByColumn: Orden
-
 	column Descripción
 		dataType: string
 		lineageTag: 771c7b4e-073d-4022-84b8-7168c41b58a0
@@ -34,6 +25,15 @@ table Motor
 		lineageTag: b78be2f4-8ecc-41a1-96f4-96d8946599bb
 		summarizeBy: none
 		sourceColumn: ORDEN
+
+	/// Etiqueta de negocio del rol — usar ESTA columna en visuales nuevos en vez de la
+	/// clave técnica 'Motor' (taxonomía s13: Rol = Primario/Validación; Método = algoritmo real).
+	column Rol
+		dataType: string
+		lineageTag: 771c7b4e-073d-4022-84b8-7168c41b58b1
+		summarizeBy: none
+		sourceColumn: ROL
+		sortByColumn: Orden
 
 	partition Partition = m
 		mode: import

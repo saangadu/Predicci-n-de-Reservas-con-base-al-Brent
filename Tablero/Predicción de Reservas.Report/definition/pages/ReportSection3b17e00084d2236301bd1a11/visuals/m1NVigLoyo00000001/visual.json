@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
-  "name": "d4aa59757e7be5fde2ad",
+  "name": "m1NVigLoyo00000001",
   "position": {
-    "x": 1680,
-    "y": 680,
-    "z": 14000,
-    "height": 96,
+    "x": 728,
+    "y": 866,
+    "z": 20600,
+    "height": 170,
     "width": 216,
-    "tabOrder": 14000
+    "tabOrder": 20600
   },
   "visual": {
     "visualType": "cardVisual",
@@ -25,14 +25,14 @@
                           "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "Divergencia Motores (%)"
+                      "Property": "N Vigencias LOYO"
                     }
                   },
-                  "Function": 1
+                  "Function": 4
                 }
               },
-              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
-              "nativeQueryRef": "Avg of Divergencia Motores (%)"
+              "queryRef": "Max(Modelo Campo.N Vigencias LOYO)",
+              "nativeQueryRef": "Max of N Vigencias LOYO"
             }
           ]
         }
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "24D"
                 }
               }
             }
@@ -84,7 +84,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Divergencia Motores'"
+                  "Value": "'N Vigencias LOYO'"
                 }
               }
             }

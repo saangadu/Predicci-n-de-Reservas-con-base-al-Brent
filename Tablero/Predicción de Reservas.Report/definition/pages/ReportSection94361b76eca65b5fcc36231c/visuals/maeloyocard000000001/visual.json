@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
-  "name": "d4aa59757e7be5fde2ad",
+  "name": "maeloyocard000000001",
   "position": {
-    "x": 1680,
-    "y": 680,
-    "z": 14000,
+    "x": 1440,
+    "y": 456,
+    "z": 12200,
     "height": 96,
     "width": 216,
-    "tabOrder": 14000
+    "tabOrder": 12200
   },
   "visual": {
     "visualType": "cardVisual",
@@ -25,14 +25,14 @@
                           "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "Divergencia Motores (%)"
+                      "Property": "MAE LOYO (MBPE)"
                     }
                   },
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
-              "nativeQueryRef": "Avg of Divergencia Motores (%)"
+              "queryRef": "Avg(Modelo Campo.MAE LOYO (MBPE))",
+              "nativeQueryRef": "Avg of MAE LOYO (MBPE)"
             }
           ]
         }
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "20D"
                 }
               }
             }
@@ -84,7 +84,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Divergencia Motores'"
+                  "Value": "'MAE LOYO (MBPE)'"
                 }
               }
             }

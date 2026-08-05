@@ -200,7 +200,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'M2 — Precio Neto = α+β·Brent (recta Theil-Sen + cierres HIST por año)'"
+                  "Value": "'M2 — Precio Neto = α+β·Brent (recta + cierres HIST por año)'"
                 }
               }
             },

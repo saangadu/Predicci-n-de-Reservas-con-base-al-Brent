@@ -311,6 +311,14 @@ table 'Modelo Campo'
 		summarizeBy: none
 		sourceColumn: METODO_REAL_PRIMARIO
 
+	/// Dataset de entrenamiento de la familia M2 adoptada (s11): HIST (solo cierres reales) o HIST+CONSOLIDADO (cierres + sensibilidades del deck). Registro: seleccion_metodos_m2.csv.
+	column 'M2 Dataset'
+		dataType: string
+		displayFolder: 3. Modelo M2
+		lineageTag: a1b2c3d4-0027-4001-9001-000000000027
+		summarizeBy: none
+		sourceColumn: M2_DATASET
+
 	partition Partition = m
 		mode: import
 		source =
@@ -326,7 +334,7 @@ table 'Modelo Campo'
 				    Prod = fCarga(RutaBase & "\resultados\dim_campo_modelo.csv", "Producción"),
 				    Cal = fCarga(RutaBase & "\resultados_calidad\dim_campo_modelo.csv", "Calidad"),
 				    Union = Table.Combine({Prod, Cal}),
-				    Tipos = Table.TransformColumnTypes(Union, {{"CAMPO", type text}, {"TIPO_MODELO", type text}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"AÑO_BASELINE", Int64.Type}, {"CIERRE_2025_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"PISO_EFECTIVO_USD_BBL", type number}, {"BREAKEVEN_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_USD_BBL", type number}, {"BREAKEVEN_REF_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"ALERTA_BK", type text}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"MAE_LOYO_MBPE", type number}, {"SKILL_LOYO", type number}, {"N_VIGENCIAS_LOYO", Int64.Type}, {"SESGO_RECUPERACION", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_R2", type number}, {"M2_MAE_LOO", type number}, {"M2_ALERTA", type text}, {"METODO_REAL_SUAVE", type text}, {"METODO_REAL_PRIMARIO", type text}, {"AMBIENTE", type text}}, "en-US")
+				    Tipos = Table.TransformColumnTypes(Union, {{"CAMPO", type text}, {"TIPO_MODELO", type text}, {"VOLUMEN_1P_BASELINE_MBPE", type number}, {"AÑO_BASELINE", Int64.Type}, {"CIERRE_2025_MBPE", type number}, {"P_REF_USD_BBL", type number}, {"PISO_EFECTIVO_USD_BBL", type number}, {"BREAKEVEN_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_USD_BBL", type number}, {"BREAKEVEN_REF_USD_BBL", type number}, {"PRECIO_EQUILIBRIO_REF_USD_BBL", type number}, {"M2_METODO", type text}, {"M2_ES_FALLBACK", type logical}, {"M2_N_PUNTOS", Int64.Type}, {"M2_R2_LOO", type number}, {"M2_FRAGIL", type logical}, {"SENSIBILIDAD_NO_IDENTIFICADA", type logical}, {"CONFOUND_ETA2", type number}, {"ALERTA_BK", type text}, {"NIVEL_CONFIANZA", type text}, {"MOTIVO_CONFIANZA", type text}, {"N_REAL_DELTA", Int64.Type}, {"MAE_REL_LOO", type number}, {"DIVERGENCIA_MOTORES_PCT", type number}, {"ALERTA_LOO_OUTLIER_ISO", type logical}, {"MAE_LOYO_MBPE", type number}, {"SKILL_LOYO", type number}, {"N_VIGENCIAS_LOYO", Int64.Type}, {"SESGO_RECUPERACION", type number}, {"ALPHA", type number}, {"BETA", type number}, {"M2_R2", type number}, {"M2_MAE_LOO", type number}, {"M2_ALERTA", type text}, {"METODO_REAL_SUAVE", type text}, {"METODO_REAL_PRIMARIO", type text}, {"M2_DATASET", type text}, {"AMBIENTE", type text}}, "en-US")
 				in
 				    Tipos
 

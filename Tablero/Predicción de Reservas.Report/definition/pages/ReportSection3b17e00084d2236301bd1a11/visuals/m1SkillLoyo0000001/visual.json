@@ -1,13 +1,13 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/report/definition/visualContainer/2.10.0/schema.json",
-  "name": "d4aa59757e7be5fde2ad",
+  "name": "m1SkillLoyo0000001",
   "position": {
-    "x": 1680,
-    "y": 680,
-    "z": 14000,
-    "height": 96,
+    "x": 496,
+    "y": 866,
+    "z": 20500,
+    "height": 170,
     "width": 216,
-    "tabOrder": 14000
+    "tabOrder": 20500
   },
   "visual": {
     "visualType": "cardVisual",
@@ -25,14 +25,14 @@
                           "Entity": "Modelo Campo"
                         }
                       },
-                      "Property": "Divergencia Motores (%)"
+                      "Property": "Skill LOYO"
                     }
                   },
                   "Function": 1
                 }
               },
-              "queryRef": "Avg(Modelo Campo.Divergencia Motores (%))",
-              "nativeQueryRef": "Avg of Divergencia Motores (%)"
+              "queryRef": "Avg(Modelo Campo.Skill LOYO)",
+              "nativeQueryRef": "Avg of Skill LOYO"
             }
           ]
         }
@@ -61,7 +61,7 @@
             "fontSize": {
               "expr": {
                 "Literal": {
-                  "Value": "22D"
+                  "Value": "24D"
                 }
               }
             }
@@ -84,7 +84,7 @@
             "text": {
               "expr": {
                 "Literal": {
-                  "Value": "'Divergencia Motores'"
+                  "Value": "'Skill LOYO (M1)'"
                 }
               }
             }
